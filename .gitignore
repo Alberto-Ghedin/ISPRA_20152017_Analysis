@@ -1,0 +1,26 @@
+__Pycache__
+j*.gz
+julia-*
+Manzoni_course
+PyCactus-master
+ULNPM/Exercise_1/*.pdf
+*ipynb_checkpoints
+*checkpoint.ipynb
+ULNPM/.ipynb_checkpoints
+Tests/IPyC/input.json
+Tests/IPyC/input.txt
+Tests/IPyC/main.py
+Tests/NE_data.py
+Tests/NE_test.ipynb
+Tests/ne_10m_coastline.shp
+Tests/ne_50m_coastline.shp
+data_MSFD*
+*.nc
+SQL/eutrophication_Mediterranean_Eutrophication_Med_timeseries_2021_xeGvUqDF_nc_variables.txt
+*.nc
+AntColonyOptimization/
+AntColonyOptimization-master.zip
+*.png
+Descriptive Analysis ISPRA.docx
+sample_env_data_from_Copernicus/*.nc
+sample_env_data_from_Copernicus/*.csv
