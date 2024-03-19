@@ -4,13 +4,15 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy.cluster.hierarchy import dendrogram
 import pandas as pd
+from datetime import datetime
+import os
 
-def make_color_map(labels : list[object], palette_name : str = "Spectral"): 
+def make_color_map(labels, palette_name : str = "Spectral"): 
     color_labels = np.unique(labels)
     color_values = sns.color_palette(palette_name, len(color_labels))
     return dict(zip(color_labels, color_values))
 
-def make_colors_from_labels(labels : list[object], palette_name : str = "Spectral"):     
+def make_colors_from_labels(labels, palette_name : str = "Spectral"):     
     color_map = make_color_map(labels, palette_name)
     return list(map(lambda i : color_map[i], labels))
 
@@ -25,7 +27,8 @@ def discrete_colormap(z : list, n_colors : int = None, palette_name : str = "jet
     
     return cm, bounds, norm
 
-def plot_italian_coast(ax, xs : list[object] , ys : list[object], **kargs): 
+def plot_italian_coast(ax, xs, ys, **kargs): 
+
     
     x_max = -np.inf
     x_min = np.inf
@@ -44,7 +47,7 @@ def plot_italian_coast(ax, xs : list[object] , ys : list[object], **kargs):
 
 
 def compare_histograms(
-    dfs : list[pd.DataFrame],  
+    dfs,  
     variables : list[str], 
     sup_title : str=None, 
     titles : list[str]=None,
@@ -114,3 +117,18 @@ def plot_dendrogram(model, **kwargs):
     # Plot the corresponding dendrogram
     dendrogram(linkage_matrix, **kwargs)
 
+
+# create directory to insert output of script
+def make_sim_directory(description : str):
+    def wrap(script):  
+        def wrap_script(file_path : str, output_dir: str): 
+            current_datetime = datetime.now()
+            current_date = current_datetime.date().strftime("%Y_%m_%d")
+            current_time = current_datetime.time().strftime("%H_%M_%S")
+            output_dir += f"/{current_date}/{current_time}"
+            os.makedirs(file_path + f"/{output_dir}", exist_ok=True)
+            with open(file_path + f"/{output_dir}" + "/descr.txt", "a+") as description_file:
+                description_file.write(description)
+            script(file_path, output_dir)
+        return wrap_script
+    return wrap

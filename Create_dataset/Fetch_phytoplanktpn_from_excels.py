@@ -1,20 +1,15 @@
-import pymysql
-from pymysql.constants import CLIENT
 import os
-import json
 import pandas as pd
 import string
-import numpy as np
-import argparse
 from datetime import datetime
 
-
-excel_path = "/mnt/d/PHD/MSFD/Data/Modulo1/"
+_HOME_ = "/mnt/d"
+excel_path = _HOME_ + "/PHD/MSFD/Data/Modulo1/"
 
 excel_file_names = filter(lambda x:  "Modulo_1" in x, os.listdir(excel_path))
 
 df = df = pd.DataFrame({"NationalStationID": [], "Year": [], "Month": [], "Day": [], "Time": [
-    ], "SampleDepth": [], "Gruppo": [], "Taxon": [], "NuovoTaxon": [], "Autore": [], "Num_cell_l": []})
+    ], "SampleDepth": [], "Gruppo": [], "Taxon": [], "NuovoTaxon": [], "Autore": [], "Num_cell_l": [], "file_name" : []})
 for excel_file_name in excel_file_names:
     print("_"*10 + f"reading {excel_file_name}" + "_"*10)
     # INSERTING DATA
@@ -30,11 +25,12 @@ for excel_file_name in excel_file_names:
                                                                     "Taxon",
                                                                     "NuovoTaxon",
                                                                     "Autore",
-                                                                    "Num_cell_l"
-                                                                    ]]
+                                                                    "Num_cell_l", 
+                                                                    "Remarks"
+                                                                    ]].assign(file_name = excel_file_name)
     ]
     )
 
 print(df.describe())
 
-df.to_csv(excel_path + "/phyto_abund_raw.csv")
+df.to_csv(excel_path + "/phyto_abund_raw.csv", index = 0)
