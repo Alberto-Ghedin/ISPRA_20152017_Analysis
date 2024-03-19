@@ -1,9 +1,6 @@
 __Pycache__
 j*.gz
 julia-*
-Manzoni_course
-PyCactus-master
-ULNPM/Exercise_1/*.pdf
 *ipynb_checkpoints
 *checkpoint.ipynb
 ULNPM/.ipynb_checkpoints
@@ -24,3 +21,5 @@ AntColonyOptimization-master.zip
 Descriptive Analysis ISPRA.docx
 sample_env_data_from_Copernicus/*.nc
 sample_env_data_from_Copernicus/*.csv
+*.pdf
+Plots
