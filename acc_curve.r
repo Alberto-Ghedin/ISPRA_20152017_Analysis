@@ -4,18 +4,21 @@ library(readxl)
 library(dplyr)
 library(tidyr)
 library(pals)
+library(rjson)
 
 # Load data
-HOME_ <- "/mnt/d" 
-sheet_names <- excel_sheets("/mnt/d/PHD/ISPRA_20152017_Analysis/eco_matrix_region.xlsx")
+params <- fromJSON(file = paste(path.expand("~"), "sys_specific.json", sep = "/"))
+HOME_ <- paste(params$home, "PHD", sep = "/")
+
+sheet_names <- excel_sheets(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"))
 
 data <- list()  # Create an empty list to store the data from each sheet
 
 for (sheet in sheet_names) {
-    data[[sheet]] <- read_excel("/mnt/d/PHD/ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sheet = sheet)
+    data[[sheet]] <- read_excel(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"), sheet = sheet)
 }
 
-plot_path <- paste(HOME_, "/PHD/ISPRA_20152017_Analysis/Plots/Rich_levels/Acc_curve", sep = "")
+plot_path <- paste(HOME_, "ISPRA_20152017_Analysis/Plots/Rich_levels/Acc_curve", sep = "/")
 dir.create(plot_path, showWarnings = FALSE)
 for (region in names(data)) {
         data[[region]][, c(1:3)] <- data[[region]][, c(1:3)] %>% fill(Region, Season, id)
