@@ -18,14 +18,15 @@ for (sheet in sheet_names) {
     data[[sheet]] <- read_excel(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"), sheet = sheet)
 }
 
+
 plot_path <- paste(HOME_, "ISPRA_20152017_Analysis/Plots/Rich_levels/Acc_curve", sep = "/")
-dir.create(plot_path, showWarnings = FALSE)
+dir.create(plot_path, recursive = TRUE, showWarnings = FALSE)
 for (region in names(data)) {
-        data[[region]][, c(1:3)] <- data[[region]][, c(1:3)] %>% fill(Region, Season, id)
+        data[[region]][, c(1:3)] <- data[[region]][, c(1:3)] %>% fill(Season, id)
         incidence_freq_list <- list()
         incidence_freq_dataframe <- merge(
         data[[region]] %>% group_by(Season) %>% summarise(n_samples = n_distinct(id, Date)), 
-        data[[region]] %>% select(-c(Region,id, Date)) %>% group_by(Season) %>% summarise_all(~sum(. != 0)), 
+        data[[region]] %>% select(-c(id, Date)) %>% group_by(Season) %>% summarise_all(~sum(. != 0)), 
         by = "Season"
         )
         for (season in unique(incidence_freq_dataframe$Season)) {
@@ -39,10 +40,10 @@ for (region in names(data)) {
 
 incidence_freq_list <- list()
 for (region in names(data)) {
-        data[[region]][, c(1:3)] <- data[[region]][, c(1:3)] %>% fill(Region, Season, id)
+        data[[region]][, c(1:3)] <- data[[region]][, c(1:3)] %>% fill(Season, id)
         incidence_freq_dataframe <- merge(
             data[[region]] %>% summarise(n_samples = n_distinct(id, Date)),
-            data[[region]] %>% select(-c(Region,id, Date, Season)) %>% summarise_all(~sum(. != 0))
+            data[[region]] %>% select(-c(id, Date, Season)) %>% summarise_all(~sum(. != 0))
             )
         incidence_freq_dataframe <- incidence_freq_dataframe %>% .[. != 0]
         incidence_freq_list[[region]] <- incidence_freq_dataframe
