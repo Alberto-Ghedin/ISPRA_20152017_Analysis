@@ -146,38 +146,10 @@ davies_scores[method] = davies
 method_labels[method] = ward_labels
 del linkage_matrix
 
-#SPECTRAL CLUSTERING correlation
-method = "spectral_corr"
-if rank == 0:
-    print(f"Computing {method} clustering")
-if rank == 0:
-    eco_matrix = sites_taxa.to_numpy()
-    D_c = np.diag(np.sum(eco_matrix, axis = 0))
-    #compute diagonal inverse of D_c 
-    inv = np.diag(1 / np.diag(D_c))
-    similarity = eco_matrix @ inv @ eco_matrix.T
-    del D_c, inv
-else: 
-    similarity = None
-    eco_matrix = None
-    
-similarity = comm.bcast(similarity, root = 0)
-eco_matrix = comm.bcast(eco_matrix, root = 0)
-spectral_labels = np.empty((n_times, X.shape[0]))
-for i, n in enumerate(n_clusters[rank::size]):
-    spectral_clustering = SpectralClustering(n_clusters = n, affinity = "precomputed", assign_labels="cluster_qr")
-    spectral_labels[i,:] = spectral_clustering.fit_predict(similarity)
-    silhouette[i] = metrics.silhouette_score(eco_matrix, spectral_labels[i,:])
-    calisnki[i] = metrics.calinski_harabasz_score(eco_matrix, spectral_labels[i,:])
-    davies[i] = metrics.davies_bouldin_score(eco_matrix, spectral_labels[i,:])
 
-silhouette_scores[method] = silhouette
-calisnki_scores[method] = calisnki
-davies_scores[method] = davies
-method_labels[method] = spectral_labels
 
 #SPECTRAL CLUSTERING euclidean
-method = "spectral_dist"
+method = "spectral"
 if rank == 0:
     print(f"Computing {method} clustering")
 if rank == 0:
@@ -190,7 +162,7 @@ else:
 
 similarity = comm.bcast(similarity, root = 0)
 
-
+spectral_labels = np.empty((n_times, X.shape[0]))
 for i, n in enumerate(n_clusters[rank::size]):
     spectral_clustering = SpectralClustering(n_clusters = n, affinity = "precomputed", assign_labels="cluster_qr")
     spectral_labels[i,:] = spectral_clustering.fit_predict(similarity)
@@ -224,7 +196,7 @@ if rank == 0:
     df_n_cluster_members = pd.concat(df_n_cluster_members, axis = 0)
     df_n_cluster_members.sort_index().to_csv(_HOME_ + "/PHD/ISPRA_20152017_Analysis/n_cluster_members.csv")
  
-#consensun amog different methods
+#consensun among different methods
 df_consensus = pd.DataFrame(
     {},
     columns = pd.MultiIndex(levels = [[], []], codes = [[], []], names = ["Index", "Methods"])
