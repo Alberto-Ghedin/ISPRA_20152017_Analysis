@@ -19,22 +19,26 @@ from sklearn.neighbors import KNeighborsClassifier, kneighbors_graph
 import time
 import matplotlib.pyplot as plt
 
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
+
 def compute(train : np.ndarray[np.float64], 
          #test : np.array[float],
          min_clusts : int, 
          max_clusts : int, 
-         sigma : list[float], 
+         sigma : list[float] | float, 
          output_dir : str, 
          iter_cv : int = 10, 
          nfolds : int = 2,
          classifier = KNeighborsClassifier(), 
          nrands : int = 100
-         ): 
-    
-    comm = MPI.COMM_WORLD
-    rank = comm.Get_rank()
-    size = comm.Get_size()
+         ):
 
+
+    if isinstance(sigma, list):
+        pass
+    
     clust_list = list(range(min_clusts, max_clusts))
 
     print(

@@ -1,10 +1,10 @@
 {
     "method" : "spectral", 
-    "min_clusts" : 3,
-    "max_clusts" : 5, 
+    "min_clusts" : 10,
+    "max_clusts" : 20, 
     "output_dir" : "Stability_spectral", 
     "path_to_output" : "/PHD/ISPRA_20152017_Analysis/Clustering/Results", 
     "path_to_data" : "/PHD/ISPRA_20152017_Analysis/site_taxa_matrix.csv",
-    "sigmas" : 0.5, 
-    "nrands" : 4
+    "sigmas" : 1.5, 
+    "nrands" : 100
 }

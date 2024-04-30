@@ -6,37 +6,62 @@ from sklearn.model_selection import train_test_split
 import numpy as np
 from plotting import create_sim_subdirectories
 import stability_spectral
+from mpi4py import MPI
 
-with open(path.expanduser("~") + "/sys_specific.json") as file: 
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
+
+if rank == 0: 
+    with open(path.expanduser("~") + "/sys_specific.json") as file: 
+            params = json.load(file)
+    _HOME_ = params["home"]
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("params", help="Path to the params json file")
+    args = parser.parse_args()
+    params_path = args.params
+    with open(params_path, "r") as file:
         params = json.load(file)
-_HOME_ = params["home"]
+    method = params["method"]
+    output_dir = params["output_dir"]
+    path_to_output = _HOME_ + params["path_to_output"]
+    path_to_data = _HOME_ + params["path_to_data"]
+    min_clusts = params["min_clusts"]
+    max_clusts = params["max_clusts"]
+    sigmas = params["sigmas"]
+    nrands = params["nrands"]
 
-parser = argparse.ArgumentParser()
-parser.add_argument("params", help="Path to the params json file")
-args = parser.parse_args()
-params_path = args.params
-with open(params_path, "r") as file:
-    params = json.load(file)
-method = params["method"]
-output_dir = params["output_dir"]
-path_to_output = _HOME_ + params["path_to_output"]
-path_to_data = _HOME_ + params["path_to_data"]
-min_clusts = params["min_clusts"]
-max_clusts = params["max_clusts"]
-sigmas = params["sigmas"]
-nrands = params["nrands"]
+    description = "stability analysis \n" \
+                    + "parameters:" \
+                    + "\n".join([f"{key} : {value}" for key, value in params.items()])
 
-description = f"stability analysis"
+    output_dir = create_sim_subdirectories(path_to_output, output_dir, description)
+    sites_taxa = pd.read_csv(path_to_data, index_col=[0, 1])
 
-output_dir = create_sim_subdirectories(path_to_output, output_dir, description)
-sites_taxa = pd.read_csv(path_to_data, index_col = [0,1])
+    #hellinger transformation
+    abund_hellinger = sites_taxa.apply(lambda x: np.sqrt(x / sum(x)), axis=1)
+    X = abund_hellinger.to_numpy()
+    X_tr, X_ts, = train_test_split(X,
+                                    test_size=0.25,
+                                    random_state=42)
+else: 
+    output_dir = None
+    X_tr = None
+    min_clusts = None
+    max_clusts = None
+    sigmas = None
+    nrands = None
+    method = None
 
-#hellinger transformation
-abund_hellinger = sites_taxa.apply(lambda x: np.sqrt(x / sum(x)), axis = 1)
-X = abund_hellinger.to_numpy()
-X_tr, X_ts, = train_test_split(X,
-                                test_size=0.25,
-                                random_state=42)
+output_dir = comm.bcast(output_dir, root = 0)
+X_tr = comm.bcast(X_tr, root = 0)
+min_clusts = comm.bcast(min_clusts, root = 0)
+max_clusts = comm.bcast(max_clusts, root = 0)
+sigmas = comm.bcast(sigmas, root = 0)
+nrands = comm.bcast(nrands, root = 0)
+method = comm.bcast(method, root = 0)
+
 
 
 #SELECTING METHOD
