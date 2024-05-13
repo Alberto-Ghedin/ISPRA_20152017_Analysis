@@ -58,12 +58,6 @@ selected_species <- lapply(list_dfs, function(df) {
 #compute PCA for each cluster using selected species
 pca_results <- vector("list", 2)
 names(pca_results) <- c("ward", "spectral_1.5_10")
-plot_path <- paste(HOME_, "ISPRA_20152017_Analysis/Clustering/PCA", sep = "/")
-for (method in names(pca_results)) {
-    dir.create(paste(plot_path, method, sep = "/"), recursive = TRUE, showWarnings = FALSE)
-
-}
-
 for (method in names(pca_results)) {
     selected_species[[method]]$Taxa <- as.character(selected_species[[method]]$Taxa)
     
@@ -73,19 +67,52 @@ for (method in names(pca_results)) {
         cluster_data <- cluster_data %>% select(c("id", "Date", selected_species[[method]]$Taxa)) %>%  select_if(~ !is.numeric(.) || sum(.) != 0)
         is_all_zero <- rowSums(cluster_data[-c(1,2)]) == 0
         cluster_data <- cluster_data[!is_all_zero,]
-        print(method, cluster)
         pca_results[[method]][[as.character(cluster)]] <- rda(decostand(cluster_data[, -c(1,2)], "hellinger"), scale = FALSE)
-        biplot(pca_results[[method]][[as.character(cluster)]], scaling = 1, type = "text", cex = 0.7, col = "blue")
+        }
+}
+
+for (method in names(pca_results)) {
+    for (cluster in names(pca_results[[method]])) {
+        #computed explained variance by first two axes
+        pca <- pca_results[[method]][[cluster]]
+        explained_variance <- sum(pca$CA$eig[c(1,2)]) / sum(pca$CA$eig)
+        print(paste(method, cluster, explained_variance, sep = " "))
     }
 }
 
-test <- rda(decostand(cluster_data[, -c(1,2)], "hellinger"), scale = FALSE)
+summary(pca_results[["ward"]][["0"]])$cont
+pca_results[["ward"]][["0"]]$CA$eig[c(1,2)]
 
-colSums(cluster_data[-c(1,2)]) == 0
-decostand(cluster_data[, -c(1,2)], "hellinger")
-#print explained variance of test
-names(test)
-biplot(test, scaling = 2, type = "text", cex = 0.7, col = "blue", display = "species")
+sum(pca_results[["ward"]][["0"]]$CA$eig[c(1,2)])
+sum(pca_results[["ward"]][["0"]]$CA$eig)
+plot_path <- paste(HOME_, "ISPRA_20152017_Analysis/Clustering/PCA", sep = "/")
+for (method in names(pca_results)) {
+    dir.create(paste(plot_path, method, sep = "/"), recursive = TRUE, showWarnings = FALSE)
+
+}
+
+for (method in names(pca_results)) {
+    for (cluster in names(pca_results[[method]])) {
+        pca <- pca_results[[method]][[cluster]]
+        explained_variance <- lapply(pca$CA$eig[c(1,2)], function(x) {
+            x / sum(pca$CA$eig)
+        }
+        )
+        png(paste(plot_path, method, paste("biplot_", cluster, ".png", sep = ""), sep = "/"), width = 1500, height = 960, res = 100)
+        par(mfrow = c(1, 2))
+        biplot(pca_results[[method]][[as.character(cluster)]], scaling = 1, type = "text", display = "sites", cex = 0.7, col = "blue", main = "scaling 1", xlab = "", ylab = "")
+        title(xlab=paste("PC1", round(explained_variance$PC1, 2), sep = " "), ylab=paste("PC2", round(explained_variance$PC2, 2), sep = " "), mgp=c(2.2, 2.2, 0))
+        biplot(pca_results[[method]][[as.character(cluster)]], scaling = 2, type = "text", cex = 0.7, display = "species", col = "blue", main = "scaling 2", xlab = "", ylab = "")
+        title(xlab=paste("PC1", round(explained_variance$PC1, 2), sep = " "), ylab=paste("PC2", round(explained_variance$PC2, 2), sep = " "), mgp=c(2.2, 2.2, 0))
+        dev.off()
+    }
+}
+
+pca <- pca_results[[method]][[cluster]]
+explained_variance <- lapply(pca$CA$eig[c(1,2)], function(x) {
+    x / sum(pca$CA$eig)
+}
+)
 
 ggplot() +
     geom_point(data = scores(test), aes(x = PC1, y = PC2)) +
