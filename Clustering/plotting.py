@@ -6,6 +6,7 @@ from scipy.cluster.hierarchy import dendrogram
 import pandas as pd
 from datetime import datetime
 import os
+import json
 
 def make_color_map(labels, palette_name : str = "Spectral"): 
     color_labels = np.unique(labels)
@@ -117,14 +118,18 @@ def plot_dendrogram(model, **kwargs):
     # Plot the corresponding dendrogram
     dendrogram(linkage_matrix, **kwargs)
 
-def create_sim_subdirectories(file_path : str, output_dir : str, description : str): 
+def create_sim_subdirectories(file_path : str, output_dir : str, description : str = None, metadata : dict = None): 
     current_datetime = datetime.now()
     current_date = current_datetime.date().strftime("%Y_%m_%d")
     current_time = current_datetime.time().strftime("%H_%M_%S")
     output_dir = f"{file_path}/{output_dir}/{current_date}/{current_time}"
     os.makedirs(output_dir, exist_ok=True)
-    with open(f"{output_dir}/descr.txt", "a+") as description_file:
-                description_file.write(description)
+    if metadata: 
+        with open(f"{output_dir}/metadata.json", "w") as metadata_file:
+            json.dump(metadata, metadata_file)
+    if description:
+        with open(f"{output_dir}/descr.txt", "a+") as description_file:
+                    description_file.write(description)
     return output_dir
 
 # create directory to insert output of script
