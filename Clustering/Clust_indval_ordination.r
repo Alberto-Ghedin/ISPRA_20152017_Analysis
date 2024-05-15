@@ -53,7 +53,9 @@ selected_species <- lapply(list_dfs, function(df) {
   df %>% filter(pval < 0.05 & max_val > 0.25)
 })
 
-
+#write on excel with multiple sheets
+write
+write.xlsx(selected_species, paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/selected_species.xlsx", sep = "/"))
 
 #compute PCA for each cluster using selected species
 pca_results <- vector("list", 2)
