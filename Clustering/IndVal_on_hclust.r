@@ -2,7 +2,7 @@ library(vegan)
 library(ggplot2)
 library(dplyr)
 library(lubridate)
-library(labdsv)
+#library(labdsv)
 library(tibble)
 library(jsonlite)
 library(zoo)
@@ -22,9 +22,6 @@ site_taxa$Region <- factor(site_taxa$Region, levels = params$ordered_regions, or
 site_taxa$id <- factor(site_taxa$id, levels = params$ordered_id, ordered = TRUE)
 site_taxa$Season <- factor(site_taxa$Season, levels = names(params$seasons), ordered = TRUE)
 
-hell_dist <- vegdist(decostand(as.matrix(site_taxa[ , -c(1:4)]), "hellinger"), "euc")
-
-
 site_taxa[, -c(1:4)] <- log(site_taxa %>% select(-c(1:4)) + 1, 10)
 
 
@@ -39,10 +36,13 @@ compute_indval <- function(method, eco_matrix) {
 
 methods_ward <- index_clusters %>% select(contains("ward")) %>% names()
 
+
 indval_list <- list()
-indval_list <- mclapply(methods_ward[-1], compute_indval, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 8)
+indval_list <- mclapply(methods_ward[-1], compute_indval, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
 names(indval_list) <- methods_ward[-1]
 
+#save indval_list as excel file
+write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_on_hclust.xlsx", sep = "/"), rowNames = TRUE)
 
 species_per_cluster <- list()
 for (method in c("ward")) {
@@ -59,12 +59,14 @@ for (method in c("ward")) {
 df <- do.call(rbind, species_per_cluster)
 #df$method <- rep(names(species_per_cluster), each = nrow(df) / 2)
 
-ggplot(df, aes(x = n_clusters, y = n_species)) +
+p<- ggplot(df, aes(x = n_clusters, y = n_species)) +
   geom_line() +
   labs(x = "N_clusters", y = "N_species") +
   scale_x_continuous(breaks = seq(min(df$n_clusters), max(df$n_clusters), 1)) +
   theme_minimal()
 
+#save plot as png
+ggsave(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/Species_per_cluster.pdf", sep = "/"), plot = p, width = 10, height = 5)
 
 h_clust_sklearn <- as.matrix(read.table(paste(HOME_ , "ISPRA_20152017_Analysis/Clustering/Results/link_matrix_to_hclust.txt", sep = "/"), sep = " ", header = FALSE))
 
