@@ -27,7 +27,6 @@ if rank == 0:
     output_dir = params["output_dir"]
     path_to_output = _HOME_ + params["path_to_output"]
     path_to_data = _HOME_ + params["path_to_data"]
-    path_to_relevant_species = _HOME_ + params.get("path_to_relevant_species", "")
     min_clusts = params["min_clusts"]
     max_clusts = params["max_clusts"]
     sigmas = params.get("sigmas", None)
@@ -40,13 +39,11 @@ if rank == 0:
 
 
     output_dir = create_sim_subdirectories(path_to_output, output_dir, metadata = metadata)
-    sites_taxa = pd.read_csv(path_to_data, index_col=[0, 1])
+    sites_taxa = pd.read_csv(path_to_data, index_col=[0, 1, 2, 3])
 
-    with open(path_to_relevant_species, 'r') as file:
-        relevant_species = [line.strip() for line in file]
 
     #hellinger transformation
-    abund_hellinger = sites_taxa.loc[:, relevant_species].apply(lambda x: np.sqrt(x / sum(x)), axis=1)
+    abund_hellinger = sites_taxa.apply(lambda x: np.sqrt(x / sum(x)), axis=1)
     X = abund_hellinger.to_numpy()
     X_tr, X_ts, = train_test_split(X,
                                     test_size=0.25,
