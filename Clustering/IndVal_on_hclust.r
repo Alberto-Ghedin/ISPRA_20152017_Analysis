@@ -10,6 +10,7 @@ library(tidyr)
 library(openxlsx)
 library(parallel)
 library(indicspecies)
+library(gridExtra)
 
 # Load data
 params <- fromJSON(txt = paste(path.expand("~"), "sys_specific.json", sep = "/"))
@@ -33,31 +34,50 @@ index_clusters <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Resu
 methods <- index_clusters %>% select(contains("ward"), contains("spectral")) %>% names()
 
 
-
-compute_indval <- function(method, eco_matrix, duleg = TRUE, restcomb = NULL) {
+compute_indval <- function(method, eco_matrix, duleg = TRUE, restcomb = NULL, stat_threshold = 0) {
   result <- multipatt(site_taxa[, -c(1:4)], index_clusters[[method]], func = "IndVal.g", duleg = duleg, restcomb = restcomb)$sign
-  df <- result %>% filter(stat > 0.5, p.value < 0.05) %>% select(index, stat, p.value) %>% arrange(index)
+  df <- result %>% filter(stat > stat_threshold, p.value < 0.05) %>% select(index, stat, p.value) %>% arrange(index)
   return(df)
 }
 
-## INDVAL log all_vs_sall (ava)
+## INDVAL log all_vs_all (ava)
+f <- function(method, eco_matrix) {
+  n_clusters <- as.numeric(tail(strsplit(method, "_")[[1]], n = 1))
+  print(paste("starting", n_clusters))
+  result <- compute_indval(method, eco_matrix = eco_matrix, duleg = TRUE, stat_threshold = 0)
+  print(paste("finished", method))
+  return(result)
+}
 indval_list <- list()
-indval_list <- mclapply(methods, compute_indval, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
+indval_list <- mclapply(methods, f, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
 names(indval_list) <- methods
 write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_log_ava.xlsx", sep = "/"), rowNames = TRUE)
 
 
-## INDVAL log one_vs_sall (ova)
-indval_list <- list()
+## INDVAL log all combinations
+
 f <- function(method, eco_matrix) {
   n_clusters <- as.numeric(tail(strsplit(method, "_")[[1]], n = 1))
-  print(n_clusters)
-  compute_indval(method, eco_matrix = eco_matrix, duleg = FALSE, restcomb = c(1:n_clusters))
+  print(paste("starting", n_clusters))
+  result <- compute_indval(method, eco_matrix = eco_matrix, duleg = FALSE)
   print(paste("finished", method))
+  return(result)
 }
-indval_list <- mclapply(methods, f, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
-names(indval_list) <- methods
-write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_log_ova.xlsx", sep = "/"), rowNames = TRUE)
+
+subset <- c(1:6)
+indval_list <- list()
+indval_list <- mclapply(methods[grep("spectral", methods)][subset], f, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
+names(indval_list) <- methods[grep("spectral", methods)][subset]
+write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_spectral_combinations_1_6.xlsx", sep = "/"), rowNames = TRUE)
+
+indval_list["spectral_1.5_4"]
+subset <- c(7:12)
+indval_list <- list()
+indval_list <- mclapply(methods[grep("spectral", methods)][subset], f, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
+names(indval_list) <- methods[grep("spectral", methods)][subset]
+write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_spectral_combinations_7_12.xlsx", sep = "/"), rowNames = TRUE)
+
+
 
 ## INDVAL no_log all_vs_all (ava)
 indval_list <- list()
@@ -65,59 +85,231 @@ indval_list <- mclapply(methods, compute_indval, eco_matrix = site_taxa[, -c(1:4
 names(indval_list) <- methods
 write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_no_log_ava.xlsx", sep = "/"), rowNames = TRUE)
 
-## INDVAL no_log one_vs_all (ova)
-indval_list <- list()
-f <- function(method, eco_matrix) {
-  n_clusters <- as.numeric(tail(strsplit(method, "_")[[1]], n = 1))
-  print(n_clusters)
-  df <- compute_indval(method, eco_matrix = eco_matrix, duleg = FALSE, restcomb = c(1:n_clusters))
-  print(paste("finished", method))
-  return(df)
-}
-indval_list <- mclapply(methods, f, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
-names(indval_list) <- methods
-write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_no_log_ova.xlsx", sep = "/"), rowNames = TRUE)
-
 
 sheets <- getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_log_ava.xlsx", sep = "/"))
 
-indval_list <-  lapply(sheets, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_log_ava.xlsx", sep = "/"), sheet = sheet))
+indval_list <-  lapply(sheets, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_log_ava.xlsx", sep = "/"), sheet = sheet, rowNames = TRUE))
 names(indval_list) <- sheets
 
-species_per_cluster <- list()
+
+
+
+plot_indval_statistic <- function(indval, methods, statistic, plot_title, y_label, threshold = 0, return_plot = FALSE, plot_name = NULL) {
+stat_per_cluster <- list()
+for (method in methods) {
+  cols <- names(indval_list)[grep(method, names(indval_list))]
+  n_clusters <- sapply(cols, function(col) {as.numeric(tail(strsplit(col, "_")[[1]], n = 1))}, USE.NAMES = FALSE)
+  values <- sapply(cols, function(col) {indval_list[[col]] %>% filter(stat >= threshold) %>% pull(stat) %>% statistic}, simplify = "array", USE.NAMES = FALSE)
+  statistic_name <- deparse(substitute(statistic))
+  stat_per_cluster[[method]] <- setNames(data.frame(n_clusters = n_clusters, values), c("n_clusters", statistic_name))
+}
+print("hello")
+df <- do.call(rbind, stat_per_cluster)
+df$method <- rep(names(stat_per_cluster), sapply(c("ward", "spectral"), function(x) {length(grep(x, names(indval_list)))}, simplify = "array"))
+p<- ggplot(df, aes(x = n_clusters, y = !!rlang::sym(statistic_name), color = method, group = method)) +
+  geom_line() +
+  labs(x = "N_clusters", y = y_label, title = plot_title) +
+  scale_x_continuous(breaks = seq(min(df$n_clusters), max(df$n_clusters), 1)) +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5), plot.background = element_rect(fill = 'white'))
+#save plot as png
+if (!is.null(plot_name)) {
+  ggsave(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results", plot_name, sep = "/"), plot = p, width = 10, height = 5)
+}
+if (return_plot) {
+  return(p)
+}
+} 
+
+## PLOT SPECIES PER CLUSTER, ALL INDICATOR SPECIES
+p1 <- plot_indval_statistic(indval_list, 
+           c("ward", "spectral"), 
+           length, ,
+           "Total number of indicator species",
+           "N_species", 
+           plot_name = "Species_indval_per_cluster_log_ava_all.png")
+
+## PLOT SPECIES PER CLUSTER, INDICATOR SPECIES ABOVE 0.5
+plot_indval_statistic(indval_list, 
+           c("ward", "spectral"), 
+           length, 
+           "Total number of indicator species above 0.5",
+           "N_species", 
+           0.5,
+           plot_name = "Species_indval_per_cluster_log_ava_above_05.png")
+
+## SUM OF INDICATOR SPECIES PER CLUSTER, ALL INDICATOR SPECIES
+plot_indval_statistic(indval_list, 
+           c("ward", "spectral"), 
+           sum, 
+           "Sum of IndVal (all species)",
+           "IndVal",
+           plot_name = "Sum_indval_per_cluster_log_ava_all.png")
+
+## SUM OF INDICATOR SPECIES PER CLUSTER, INDICATOR SPECIES ABOVE 0.5
+plot_indval_statistic(indval_list, 
+           c("ward", "spectral"), 
+           sum, 
+           "Sum of IndVal (species above 0.5)",
+           "IndVal", 
+           0.5, 
+           plot_name = "Sum_indval_per_cluster_log_ava_above_05.png")
+
+## MEAN OF INDICATOR SPECIES PER CLUSTER, ALL INDICATOR SPECIES
+plot_indval_statistic(indval_list, 
+           c("ward", "spectral"), 
+           mean, 
+           "Mean of IndVal (all species)",
+           "IndVal", 
+           plot_name = "Mean_indval_per_cluster_log_ava_all.png")
+
+## MEAN OF INDICATOR SPECIES PER CLUSTER, INDICATOR SPECIES ABOVE 0.5
+plot_indval_statistic(indval_list, 
+           c("ward", "spectral"), 
+           mean, 
+           "Mean of IndVal (species above 0.5)",
+           "IndVal", 
+           0.5, 
+           plot_name = "Mean_indval_per_cluster_log_ava_above_05.png")
+
+
+args_list <- list(
+  list(indval_list, c("ward", "spectral"), length, "Total number of indicator species", "N_species", return_plot = TRUE),
+  list(indval_list, c("ward", "spectral"), length, "Total number of indicator species above 0.5", "N_species", 0.5, return_plot = TRUE),
+  list(indval_list, c("ward", "spectral"), sum, "Sum of IndVal (all species)", "IndVal", return_plot = TRUE),
+  list(indval_list, c("ward", "spectral"), "sum", "Sum of IndVal (species above 0.5)", "IndVal", 0.5, return_plot = TRUE), 
+  #list(indval_list, method = c("ward", "spectral"), mean, "Mean of IndVal (all species)", "IndVal", return_plot = TRUE),
+  list(indval_list, methods = c("ward", "spectral"), "mean", plot_title = "Mean of IndVal (species above 0.5)", y_label = "IndVal", threshold = 0.5, return_plot = TRUE)
+)
+
+plot_indval_statistic <- function(indval, methods, statistic, plot_title, y_label, threshold = 0, return_plot = FALSE, plot_name = NULL) {
+stat_per_cluster <- list()
+for (method in methods) {
+  cols <- names(indval_list)[grep(method, names(indval_list))]
+  n_clusters <- sapply(cols, function(col) {as.numeric(tail(strsplit(col, "_")[[1]], n = 1))}, USE.NAMES = FALSE)
+  values <- sapply(cols, function(col) {indval_list[[col]] %>% filter(stat >= threshold) %>% pull(stat) %>% {{statistic}} }, simplify = "array", USE.NAMES = FALSE)
+  stat_per_cluster[[method]] <- setNames(data.frame(n_clusters = n_clusters, values), c("n_clusters", statistic))
+  print(names(stat_per_cluster[[method]]))
+}
+df <- do.call(rbind, stat_per_cluster)
+df$method <- rep(names(stat_per_cluster), sapply(c("ward", "spectral"), function(x) {length(grep(x, names(indval_list)))}, simplify = "array"))
+p<- ggplot(df, aes(x = n_clusters, y = !!sym(statistic), color = method, group = method)) +
+  geom_line() +
+  labs(x = "N_clusters", y = y_label, title = plot_title) +
+  scale_x_continuous(breaks = seq(min(df$n_clusters), max(df$n_clusters), 1)) +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5), plot.background = element_rect(fill = 'white'))
+#save plot as png
+if (!is.null(plot_name)) {
+  ggsave(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results", plot_name, sep = "/"), plot = p, width = 10, height = 5)
+}
+if (return_plot) {
+  return(p)
+}
+} 
+
+# Use sapply with multiple arguments
+plots <- sapply(args_list, function(args) {
+  do.call(plot_indval_statistic, args)
+}, simplify = FALSE, USE.NAMES = FALSE)
+
+do.call(plot_indval_statistic, args_list[[4]])
+# Arrange the plots
+gridExtra::grid.arrange(grobs = plots, ncol = 2)
+
+stat_per_cluster <- list()
+
 for (method in c("ward", "spectral")) {
   cols <- names(indval_list)[grep(method, names(indval_list))]
-  n_clusters <- c()
-  n_species <- c()
-  for (col in cols) {
-    n_clusters <- c(n_clusters, as.numeric(tail(strsplit(col, "_")[[1]], n = 1)))
-    n_species <- c(n_species, nrow(indval_list[[col]]))
-  }
-  species_per_cluster[[method]] <- data.frame(n_clusters = n_clusters, n_species = n_species)
+  n_clusters <- sapply(cols, function(col) {as.numeric(tail(strsplit(col, "_")[[1]], n = 1))}, USE.NAMES = FALSE)
+  stat_per_cluster[[method]] <- do.call(rbind, mapply(function(df, n) {
+  df$n_clusters <- n
+  return(df)
+}, indval_list[cols], n_clusters, SIMPLIFY = FALSE))
+}
+stat_per_cluster["ward"]
+
+stat_per_cluster <- list()
+for (method in c("ward", "spectral")) {
+  cols <- names(indval_list)[grep(method, names(indval_list))]
+  n_clusters <- sapply(cols, function(col) {as.numeric(tail(strsplit(col, "_")[[1]], n = 1))}, USE.NAMES = FALSE)
+  stat_per_cluster[[method]] <- mapply(function(df, n) {
+  df$n_clusters <- n
+  return(df)
+}, indval_list[cols], n_clusters, SIMPLIFY = FALSE)
 }
 
+mapply(function(df, n) {
+  df$n_clusters <- n
+  return(df)
+}, indval_list[cols], n_clusters, SIMPLIFY = FALSE)
+stat_per_cluster["ward"]
 
-df <- do.call(rbind, species_per_cluster)
-df$method <- rep(names(species_per_cluster), sapply(c("ward", "spectral"), function(x) {length(grep(x, names(indval_list)))}, simplify = "array"))
+sapply(stat_per_cluster, nrow)
+df$method <- rep(names(stat_per_cluster), sapply(stat_per_cluster, nrow), simplify = "array")
 
 
-p<- ggplot(df, aes(x = n_clusters, y = n_species, color = method, group = method)) +
-  geom_line() +
+metric <- "n"
+print(df %>% group_by(method, n_clusters) %>% summarise(n = n()), n = 40)
+
+df %>% filter(n_clusters <= 2)
+
+
+df %>% group_by(method, n_clusters) %>% summarise(stat_column = sum(stat))
+df %>% group_by(method, n_clusters)
+values <- sapply(cols, function(col) {indval_list[[col]] %>% filter(stat >= threshold) %>% pull(stat) %>% {{statistic}} }, simplify = "array", USE.NAMES = FALSE)
+method
+cols
+
+
+
+deparse(substitute(mean))
+
+## ALL COMBINATIONS SPECTRAL
+#merge all indval results
+sheets <- getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_spectral_combinations_1_6.xlsx", sep = "/"))
+indval_list <-  lapply(sheets, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_spectral_combinations_1_6.xlsx", sep = "/"), sheet = sheet))
+names(indval_list) <- sheets
+sheets <- getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_spectral_combinations_7_12.xlsx", sep = "/"))
+temp <-  lapply(sheets, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_spectral_combinations_7_12.xlsx", sep = "/"), sheet = sheet)) 
+names(temp) <- sheets
+indval_list <- c(indval_list, temp)
+
+cols <- names(indval_list)
+df <- data.frame()
+for (col in cols) {
+  n_clusters <- as.numeric(tail(strsplit(col, "_")[[1]], n = 1))
+  df <- rbind(df, indval_list[[col]] %>% select(index, stat) %>% mutate(n_clusters = n_clusters))
+
+} 
+
+
+species_per_cluster["spectral"]
+df_merged <- merge(
+  merge(df %>% group_by(n_clusters) %>% summarise(n = n()), 
+  df %>% filter(index <= n_clusters) %>% group_by(n_clusters) %>% summarise(n_single = n()),
+  by = "n_clusters"), 
+  species_per_cluster[["spectral"]], 
+  by = "n_clusters"
+  )
+
+
+p<- ggplot(df_merged) +
+  geom_line(aes(x = n_clusters, y = n), color = "blue") +
+  geom_line(aes(x = n_clusters, y = n_species), color = "red") +
+  geom_line(aes(x = n_clusters, y = n_single), color = "green") +
   labs(x = "N_clusters", y = "N_species", title = "Total number of indicator species") +
   scale_x_continuous(breaks = seq(min(df$n_clusters), max(df$n_clusters), 1)) +
   theme_minimal() + 
   theme(plot.title = element_text(hjust = 0.5))
 plot(p)
-#save plot as png
-ggsave(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/Species_per_cluster_no_log_ava.pdf", sep = "/"), plot = p, width = 10, height = 5)
 
 
 
+df %>% filter(n_clusters == 2)
 
-
-
-
-
+ava <- indval_list["spectral_1.5_2"]
+merge(indval_list["spectral_1.5_2"]
 
 
 ## try species combinations
