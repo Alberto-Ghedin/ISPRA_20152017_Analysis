@@ -1,23 +1,21 @@
 library(iNEXT)
 library(ggplot2)
-library(readxl)
+library(openxlsx)
 library(dplyr)
 library(tidyr)
 library(pals)
-library(rjson)
+library(jsonlite)
 
 # Load data
-params <- fromJSON(file = paste(path.expand("~"), "sys_specific.json", sep = "/"))
+params <- fromJSON(txt = paste(path.expand("~"), "sys_specific.json", sep = "/"))
 HOME_ <- paste(params$home, "PHD", sep = "/")
 
-sheet_names <- excel_sheets(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"))
+sheet_names <- getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"))
 
 data <- list()  # Create an empty list to store the data from each sheet
 
-for (sheet in sheet_names) {
-    data[[sheet]] <- read_excel(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"), sheet = sheet)
-}
-
+data <- lapply(sheet_names, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"), sheet = sheet))
+names(data) <-  sheet_names
 
 plot_path <- paste(HOME_, "ISPRA_20152017_Analysis/Plots/Rich_levels/Acc_curve", sep = "/")
 dir.create(plot_path, recursive = TRUE, showWarnings = FALSE)
@@ -53,9 +51,10 @@ res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.9
 N <- length(incidence_freq_list)
 ggiNEXT(res, type=1, color.var="Assemblage") + theme_bw(base_size = 18) + 
 scale_shape_manual(values=rep(19,length(incidence_freq_list))) + 
-scale_fill_manual(values = unname(alphabet(N))) + 
-scale_colour_manual(values = unname(alphabet(N))) + 
-guides(shape=FALSE)
+#scale_fill_manual(values = unname(alphabet(N))) + 
+#scale_colour_manual(values = unname(alphabet(N))) + 
+ guides(shape=FALSE)
+ggsave(paste(plot_path, "/acc_curve_all_regions.png", sep = ""), width = 20, height = 10)
 
 res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 1, conf = 0.95, endpoint = 200)
 ggiNEXT(res, type=1, color.var="Assemblage") + theme_bw(base_size = 18) + 
