@@ -24,7 +24,7 @@ site_taxa$id <- factor(site_taxa$id, levels = params$ordered_id, ordered = TRUE)
 site_taxa$Season <- factor(site_taxa$Season, levels = names(params$seasons), ordered = TRUE)
 
 
-apply_log <- TRUE
+apply_log <- FALSE
 if (apply_log) {
   site_taxa[, -c(1:4)] <- log(site_taxa %>% select(-c(1:4)) + 1, 10)
 }
@@ -52,6 +52,21 @@ indval_list <- list()
 indval_list <- mclapply(methods, f, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
 names(indval_list) <- methods
 write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_log_ava.xlsx", sep = "/"), rowNames = TRUE)
+
+
+## INDVAL no log all_vs_all (ava)
+f <- function(method, eco_matrix) {
+  n_clusters <- as.numeric(tail(strsplit(method, "_")[[1]], n = 1))
+  print(paste("starting", n_clusters))
+  result <- compute_indval(method, eco_matrix = eco_matrix, duleg = TRUE, stat_threshold = 0)
+  print(paste("finished", method))
+  return(result)
+}
+indval_list <- list()
+methods[c(1:15, 19:33)]
+indval_list <- mclapply(methods[c(1:15, 19:33)], f, eco_matrix = site_taxa[, -c(1:4)], mc.cores = 4)
+names(indval_list) <- methods[c(1:15, 19:33)]
+write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_no_log_ava.xlsx", sep = "/"), rowNames = TRUE)
 
 
 ## INDVAL log all combinations
@@ -86,6 +101,7 @@ names(indval_list) <- methods
 write.xlsx(indval_list, file = paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_no_log_ava.xlsx", sep = "/"), rowNames = TRUE)
 
 
+# log data
 sheets <- getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_log_ava.xlsx", sep = "/"))
 indval_list <-  lapply(sheets, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_log_ava.xlsx", sep = "/"), sheet = sheet, rowNames = TRUE))
 names(indval_list) <- sheets
@@ -139,6 +155,60 @@ condensed_plot <- gridExtra::grid.arrange(grobs = plots, ncol = 2)
 ggsave(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_statistic_plots.png", sep = "/"), plot = condensed_plot, width = 12, height = 10)
 
 
+
+
+# no log data 
+sheets <- getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_no_log_ava.xlsx", sep = "/"))
+indval_list <-  lapply(sheets, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_no_log_ava.xlsx", sep = "/"), sheet = sheet, rowNames = TRUE))
+names(indval_list) <- sheets
+
+
+args_list <- list(
+  list(indval_list, c("ward", "spectral"), length, "Total number of indicator species", "N_species", return_plot = TRUE),
+  list(indval_list, c("ward", "spectral"), length, "Total number of indicator species above 0.5", "N_species", 0.5, return_plot = TRUE),
+  list(indval_list, c("ward", "spectral"), sum, "Sum of IndVal (all species)", "IndVal", return_plot = TRUE),
+  list(indval_list, c("ward", "spectral"), sum, "Sum of IndVal (species above 0.5)", "IndVal", 0.5, return_plot = TRUE), 
+  list(indval_list, method = c("ward", "spectral"), mean, "Mean of IndVal (all species)", "IndVal", return_plot = TRUE),
+  list(indval_list, methods = c("ward", "spectral"),mean, plot_title = "Mean of IndVal (species above 0.5)", y_label = "IndVal", threshold = 0.5, return_plot = TRUE)
+)
+
+
+plot_indval_statistic <- function(indval, methods, statistic, plot_title, y_label, threshold = 0, return_plot = FALSE, plot_name = NULL) {
+  stat_per_cluster <- list()
+  for (method in methods) {
+    cols <- names(indval_list)[grep(method, names(indval_list))]
+    n_clusters <- sapply(cols, function(col) {as.numeric(tail(strsplit(col, "_")[[1]], n = 1))}, USE.NAMES = FALSE)
+    stat_per_cluster[[method]] <- do.call(rbind, mapply(function(df, n) {
+    df$n_clusters <- n
+    return(df)
+  }, indval_list[cols], n_clusters, SIMPLIFY = FALSE))
+  }
+  df <- do.call(rbind, stat_per_cluster)
+  df$method <- rep(names(stat_per_cluster), sapply(stat_per_cluster, nrow), simplify = "array")
+  df <- df %>% filter(stat >= threshold) %>% group_by(method, n_clusters) %>%
+    summarise(stat_column = {{statistic}}(stat), .groups = "drop")
+  p<- ggplot(df, aes(x = n_clusters, y = stat_column, color = method, group = method)) +
+  geom_line() +
+  labs(x = "N_clusters", y = y_label, title = plot_title) +
+  scale_x_continuous(breaks = seq(min(df$n_clusters), max(df$n_clusters), 1)) +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5), plot.background = element_rect(fill = 'white'))
+#save plot as png
+if (!is.null(plot_name)) {
+  ggsave(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results", plot_name, sep = "/"), plot = p, width = 10, height = 5)
+}
+if (return_plot) {
+  return(p)
+}
+  }
+
+plots <- sapply(args_list, function(args) {
+  do.call(plot_indval_statistic, args)
+}, simplify = FALSE, USE.NAMES = FALSE)
+# Arrange the plots
+condensed_plot <- gridExtra::grid.arrange(grobs = plots, ncol = 2)
+
+ggsave(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_no_log_statistic_plots.png", sep = "/"), plot = condensed_plot, width = 12, height = 10)
 metric <- "n"
 print(df %>% group_by(method, n_clusters) %>% length(.), n = 40)
 
@@ -213,12 +283,36 @@ phyto_abund <- site_taxa %>%
 
 phyto_abund %>% filter(Ind.L != 0) %>% group_by(Taxon) %>% summarise(count = n()) %>% arrange(desc(count)) %>% filter(count >= quantile(count, 0.95)) %>% pull(Taxon) -> taxa
 
-phyto_abund %>% filter(Ind.L != 0) %>% group_by(Taxon) %>% summarise(count = mean(Ind.L)) %>% arrange(desc(count)) %>% filter(count >= quantile(count, 0.95)) %>% pull(Taxon) -> taxa
 
+taxa 
 length(taxa)
 dim(site_taxa)
 any(site_taxa %>% select(all_of(taxa)) %>% rowSums() == 0)
 
-choose(39, 3)
+choose(771, 2)
 
 taxa
+
+
+
+dim(test$XC)
+
+data(wetland)
+
+test$XC[c(1:10), c(1:10)]
+
+
+phyto_abund %>% filter(Ind.L != 0) %>% group_by(Taxon) %>% summarise(count = n()) %>% arrange(desc(count)) %>% filter(count >= quantile(count, 0.75)) %>% pull(Taxon) -> taxa
+print(paste("Number of taxa", length(taxa)))
+site_taxa[,-c(1:4)] %>% mutate(num_index = seq(1:nrow(site_taxa))) %>% column_to_rownames(var = "num_index") %>%  select(all_of(taxa)) %>% filter(rowSums(. != 0) > 0)-> new_eco_matrix
+print(paste("number of combinations", choose(length(taxa), 2)))
+test <- indicspecies::combinespecies(new_eco_matrix, min.order = 2, max.order = 2, FUN = min, min.occ = 1)
+
+test <- indicspecies::indicators(new_eco_matrix, cluster = index_clusters[["spectral_1.5_9"]], group = 1, func = "IndVal.g", min.order = 2, max.order = 2, sqrtIVt = 0.5)
+
+length(test$sqrtIV)
+
+length(test$finalsplist)
+
+test
+test$group.vec
