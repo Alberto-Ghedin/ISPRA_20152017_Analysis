@@ -6,10 +6,10 @@ library(labdsv)
 library(openxlsx)
 library(readxl)
 library(tibble)
-
+library(jsonlite)
 
 # Load data
-params <- fromJSON(file = paste(path.expand("~"), "sys_specific.json", sep = "/"))
+params <- fromJSON(txt = paste(path.expand("~"), "sys_specific.json", sep = "/"))
 HOME_ <- paste(params$home, "PHD", sep = "/")
 
 sheet_names <- excel_sheets(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"))
@@ -51,7 +51,7 @@ openxlsx::write.xlsx(list_dfs, file = paste(HOME_, file_path, "IndVal_per_region
 # read excel file
 sheet_names <- excel_sheets(paste(HOME_, file_path, "IndVal_per_region.xlsx", sep = "/"))
 list_dfs <- lapply(sheet_names, function(sheet) {
-  read_excel(paste(HOME_, file_path, "IndVal_per_region.xlsx", sep = "/"), sheet = sheet, chekc.names = FALSE)
+  read_excel(paste(HOME_, file_path, "IndVal_per_region.xlsx", sep = "/"), sheet = sheet)
 })
 names(list_dfs) <- sheet_names
 
@@ -75,3 +75,4 @@ selected_species <- unique(unname(unlist(selected_species, recursive = FALSE)))
 
 write(selected_species, file = paste(HOME_, file_path, "selected_species.txt", sep = "/"))
 
+paste(HOME_, file_path, "selected_species.txt", sep = "/")

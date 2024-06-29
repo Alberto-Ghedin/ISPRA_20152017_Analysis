@@ -1,0 +1,11 @@
+{
+    "method": "complete",
+    "min_clusts": 3,
+    "max_clusts": 20,
+    "output_dir": "Stability_complete",
+    "path_to_output": "/PHD/ISPRA_20152017_Analysis/Clustering/Results",
+    "path_to_data": "/PHD/ISPRA_20152017_Analysis/site_taxa_matrix.csv",
+    "path_to_relevant_species": "/PHD/ISPRA_20152017_Analysis/selected_species.txt",
+    "sigmas": 3,
+    "nrands": 100
+}
