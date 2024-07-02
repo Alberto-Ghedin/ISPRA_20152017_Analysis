@@ -13,7 +13,7 @@ env_data <-  lapply(nutrients, function(sheet) read.xlsx(paste(HOME_, "ISPRA_201
 names(env_data) <- nutrients
 
 
-
+names(env_data[["T"]])
 
 
 index_cluster <- read.csv(paste(HOME_, "/ISPRA_20152017_Analysis/Clustering/Results/cluster_index.csv", sep = "/"))
