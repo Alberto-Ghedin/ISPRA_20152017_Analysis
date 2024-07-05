@@ -23,6 +23,7 @@ site_taxa$Region <- factor(site_taxa$Region, levels = params$ordered_regions, or
 site_taxa$id <- factor(site_taxa$id, levels = params$ordered_id, ordered = TRUE)
 site_taxa$Season <- factor(site_taxa$Season, levels = names(params$seasons), ordered = TRUE)
 
+site_taxa <- site_taxa %>% filter(Region != "Basilicata")
 
 apply_log <- FALSE
 if (apply_log) {
