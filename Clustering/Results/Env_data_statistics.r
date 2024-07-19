@@ -11,11 +11,9 @@ library(rstatix)
 params <- fromJSON(txt = paste(path.expand("~"), "sys_specific.json", sep = "/"))
 HOME_ <- paste(params$home, "PHD", sep = "/")
 
-nutrients <- openxlsx::getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/Create_dataset/df_chem_phys_mod_data_cleaned.xlsx", sep = "/"))
-nutrients <- nutrients[-which(nutrients == "E_cond")]
-env_data <-  lapply(nutrients, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/Create_dataset/df_chem_phys_mod_data_cleaned.xlsx", sep = "/"), sheet = sheet, detectDate = TRUE))
-names(env_data) <- nutrients
 
+env_data <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/Create_dataset/df_chem_phys_mod_data_cleaned_long_format.csv", sep = "/")) %>% select(-X)
+env_data$Date <- as.Date(env_data$Date, format = "%Y-%m-%d")
 
 kepp_only_good_data <- TRUE
 env_data_good <- vector("list", length = length(env_data))
@@ -26,19 +24,14 @@ if (kepp_only_good_data){
 }
 
 
-
-for (nut in names(env_data)){
-    env_data[[nut]]$Date <- env_data[[nut]]$Date %>% convertToDate()
-    env_data[[nut]] <- env_data[[nut]] %>% group_by(Region, id, Date) %>% summarise(value = mean(Concentration, na.rm = TRUE), .groups = "drop") %>% rename(!!nut := value)
-}
-env_data <- Reduce(function(x, y) merge(x, y, by = c("id", "Date", "Region"), all = TRUE), env_data)
-
-
 index_cluster <- read.csv(paste(HOME_, "/ISPRA_20152017_Analysis/Clustering/Results/cluster_index.csv", sep = "/"))
 index_cluster$Date <- as.Date(index_cluster$Date, format = "%Y-%m-%d")
 
 
 env_data <- merge(env_data, index_cluster, by = c("Region", "id", "Date"))
+
+ward_columns <- names(select(env_data, contains("ward")))
+env_data %>% select(contains("ward")) %>% unique() %>% arrange_at(vars(one_of(ward_columns)))
 
 
 diff_in_clusters <- function(method, nutrients) {
@@ -64,19 +57,16 @@ return(cluster_statistic)
 }
 
 
-selected_nutrinets <- c("NH4", "NO3", "TN", "PO4", "TP", "O_sat", "Salinity", "SiO4", "pH", "Chla", "T")
-diff_in_clusters("spectral_1.5_9", selected_nutrinets)
+selected_nutrinets <- c("NH4", "NO3", "TN", "PO4", "NO2", "TP", "O_sat", "DO", "Salinity", "SiO4", "pH", "Chla", "T")
 cluster_statistic <- diff_in_clusters("ward_8", selected_nutrinets)
 apply(cluster_statistic, 1, function(row) sum(row > 0.025, na.rm = TRUE))
 
-data.frame(n_accepted = apply(cluster_statistic, 1, function(row) sum(row > 0.025, na.rm = TRUE)))
+data.frame(n_accepted = apply(cluster_statistic, 2, function(row) sum(row < 0.05, na.rm = TRUE)))
 
 write.csv(cluster_statistic, paste(HOME_, "/ISPRA_20152017_Analysis/Clustering/Results/cluster_statistic.csv", sep = "/"), row.names = TRUE)
 
+apply(cluster_statistic, 1, function(row) sum(row < 0.05, na.rm = TRUE)) %>% as.data.frame()
 
-
-
-names(env_data)
 pca_res <- prcomp(env_data %>% select(all_of(selected_nutrinets)) %>% na.omit() %>% na.omit(), scale = TRUE, center = TRUE)
 eigs <- pca_res$sdev[c(1,2)]**2 / sum(pca_res$sdev**2) 
 

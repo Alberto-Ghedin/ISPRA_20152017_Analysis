@@ -164,6 +164,7 @@ indval_list <-  lapply(sheets, function(sheet) read.xlsx(paste(HOME_, "ISPRA_201
 names(indval_list) <- sheets
 
 
+
 args_list <- list(
   list(indval_list, c("ward", "spectral"), length, "Total number of indicator species", "N_species", return_plot = TRUE),
   list(indval_list, c("ward", "spectral"), length, "Total number of indicator species above 0.5", "N_species", 0.5, return_plot = TRUE),
@@ -216,12 +217,22 @@ print(df %>% group_by(method, n_clusters) %>% length(.), n = 40)
 df %>% filter(n_clusters <= 2)
 
 
-df %>% group_by(method, n_clusters) %>% summarise(stat_column = sum(stat))
-df %>% group_by(method, n_clusters)
-values <- sapply(cols, function(col) {indval_list[[col]] %>% filter(stat >= threshold) %>% pull(stat) %>% {{statistic}} }, simplify = "array", USE.NAMES = FALSE)
-method
-cols
+##Basilicata removed
+args_list <- list(
+  list(indval_list, "ward", length, "Total number of indicator species", "N_species", return_plot = TRUE),
+  list(indval_list, "ward", length, "Total number of indicator species above 0.5", "N_species", 0.5, return_plot = TRUE),
+  list(indval_list, "ward", sum, "Sum of IndVal (all species)", "IndVal", return_plot = TRUE),
+  list(indval_list, "ward", sum, "Sum of IndVal (species above 0.5)", "IndVal", 0.5, return_plot = TRUE), 
+  list(indval_list, method = "ward", mean, "Mean of IndVal (all species)", "IndVal", return_plot = TRUE),
+  list(indval_list, methods = "ward",mean, plot_title = "Mean of IndVal (species above 0.5)", y_label = "IndVal", threshold = 0.5, return_plot = TRUE)
+)
 
+plots <- sapply(args_list, function(args) {
+  do.call(plot_indval_statistic, args)
+}, simplify = FALSE, USE.NAMES = FALSE)
+condensed_plot <- gridExtra::grid.arrange(grobs = plots, ncol = 2)
+
+ggsave(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Results/IndVal_no_log_statistic_no_bas_plots.png", sep = "/"), plot = condensed_plot, width = 12, height = 10)
 
 
 
