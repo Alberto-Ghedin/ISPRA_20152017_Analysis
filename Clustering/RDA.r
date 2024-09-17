@@ -3,24 +3,26 @@ library(dplyr)
 library(lubridate)
 library(openxlsx)
 library(tibble)
-library(jsonlite)
 library(zoo)
-library(klaR)
 library(vegan)
 library(jsonlite)
-
+library(MASS)
+library(tidyverse)
 HOME_ <- paste(path.expand("~"), "PHD", sep = "/")
 
-env_data <- read.csv(paste(HOME_, "/ISPRA_20152017_Analysis/Create_dataset/df_chem_phys_mod_data_cleaned_long_format.csv", sep = "/")) 
+#CHOOSING THE ENV_DATA  
+env_data <- read.csv(paste(HOME_, "/ISPRA_20152017_Analysis/Create_dataset/df_chem_phys_mod_data_cleaned_long_format.csv", sep = "/")) %>% dplyr::select(-c(Secchi_depth))
+env_data <- read.csv(paste(HOME_, "/ISPRA_20152017_Analysis/Clustering/Cop_variables_on_sampling_sites.csv", sep = "/")) %>% dplyr::select(-c(Latitude, Longitude, Closest_coast)) 
 sites_taxa <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/sites_taxa_matrix.csv", sep = "/"))
 sheets <- getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Unknown_effect/IndVal_method_2.xlsx", sep = "/"))
 indval_list <-  lapply(sheets, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Unknown_effect/IndVal_method_2.xlsx", sep = "/"), sheet = sheet, rowNames = TRUE))
 names(indval_list) <- sheets
 morans <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Unknown_effect/morans.csv", sep = "/"), row.names = 1)
+closest_coast <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/Stations_info.csv", sep = "/")) %>% dplyr::select(all_of(c("id", "Closest_coast")))
 #aems <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Unknown_effect/aems.csv", sep = "/"))
 #aems_season_year <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/Clustering/Unknown_effect/aems_season_year.csv", sep = "/"))
 
-sum(morans[1,] > 0)
+
 #read json file 
 params <- fromJSON(paste(HOME_ , "/ISPRA_20152017_Analysis/params.json", sep = "/"))
 seasons <- params[["seasons"]]
@@ -29,6 +31,7 @@ seasons <- rep(names(seasons), each = 3)
 #create season column 
 env_data$Date <- as.Date(env_data$Date, format = "%Y-%m-%d")
 env_data <- env_data %>% mutate(Season = factor(seasons[as.integer(format(Date, "%m"))]), Year = factor(format(Date, "%Y"))) %>% mutate(Season_year = paste(Season, Year, sep = "_"))
+env_data <- merge(env_data, closest_coast, by = "id")
 
 
 for (sheet in sheets){
@@ -47,7 +50,7 @@ boxcox_transform <- function(values, min_val = 0.001) {
     clean_values <- clean_values + min_val * 0.1
   }
 
-  lambda <- boxcox(clean_values ~ 1, plotit = FALSE)
+  lambda <- MASS::boxcox(clean_values ~ 1, plotit = FALSE)
   max_lambda <- lambda$x[which(lambda$y == max(lambda$y))]
   if (max_lambda == 0) {
     clean_values <- log(clean_values)
@@ -66,7 +69,7 @@ filter_merge_data <- function(env_data, sites_taxa, morans, covariates, species,
   temp_taxa <- temp_taxa %>% filter(rowSums(temp_taxa[, sapply(temp_taxa, is.numeric)] > 0) > threshold_obs_species) 
   temp_morans <- morans[-1, ] 
 
-  mem_vec <- sapply(C(1:n_morans_vec), function(ith) {paste("MEM", ith, sep = "")})
+  mem_vec <- sapply(C(1:n_moran_vec), function(ith) {paste("MEM", ith, sep = "")})
 
   merged_data <- merge(
     merge(
@@ -106,7 +109,8 @@ covariates <- c(
   "TN",
   "PO4",
   "TP",
-  "SiO4"
+  "SiO4", 
+  "Closest_coast"
 )
 
 all_nutrients <- c(
@@ -119,6 +123,48 @@ all_nutrients <- c(
   "TP",
   "SiO4"
 )
+
+names(env_data) 
+covariates_cop <- c(
+  "temp",
+  "sal",
+  "o2",
+  "ph",
+  "chl",
+  "no3",
+  "nppv",
+  "mld",
+  "phyc",
+  "dic",
+  "nh4",
+  "po4",
+  #"TP",
+  "Closest_coast"
+)
+
+
+heatmap_data <- env_data %>% dplyr::select(c(all_of(covariates_cop))) %>% cor() %>% as.data.frame() %>% rownames_to_column("Var1") %>% pivot_longer(-Var1, names_to = "Var2", values_to = "value")
+
+
+pca <- rda(env_data %>% dplyr::select(all_of(covariates_cop)), scale = TRUE)
+
+env <- pca$CA$eig
+cumsum(env / sum(env) * 100)
+biplot(pca, scaling = 2)
+ggplot(data = heatmap_data, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "blue") +
+  labs(x = "Variable 1", y = "Variable 2", title = "Correlation Heatmap") +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 3) +
+  theme_minimal()
+
+
+#count rows where at least one covariaets is NA
+nrow(env_data) - env_data %>% is.na(dplyr::select(., all_of(covariates))) %>% rowSums() %>% sum()
+
+sum(env_data %>% dplyr::select(all_of(covariates)) %>% is.na() %>% rowSums() > 0 ) / nrow(env_data)
+
+env_data %>% dplyr::select(all_of(covariates)) %>% head(30)
 
 variable_selection <- function(resp, expl) {
   full_model <- rda(resp ~ ., expl)
@@ -134,7 +180,7 @@ variable_selection <- function(resp, expl) {
 }
 
 
-compute_rda_model <- function(resp, expl, partial = FALSE, partial_covariates = NULL) {
+compute_rda_model <- function(resp, expl, covariates, partial = FALSE, partial_covariates = NULL) {
   if (partial) {
     mod <- rda(
       formula(
@@ -164,7 +210,8 @@ create_resp_expl_data <- function(
   temporal_factor, 
   boxcox = FALSE, 
   rem_multiv_out = FALSE, 
-  threshold_obs_species = 1
+  threshold_obs_species = 1, 
+  log_transform = FALSE
  ) {
   print(paste("using as covariates: ", paste(covariates, collapse = ", ")))
   print(paste("number of spatial eigenvectors: ", n_moran_vec))
@@ -172,10 +219,10 @@ create_resp_expl_data <- function(
 
   print(paste("applying boxcox", boxcox))
   if (boxcox) {
-    env_data <- env_data %>% mutate(across(-c(Region, id, Date, Secchi_depth, Season, Year, Season_year), ~ boxcox_transform(.))) 
+    env_data <- env_data %>% mutate(across(-c(id, Date, Season, Year, Season_year, Closest_coast), ~ boxcox_transform(.))) 
   }
 
-  RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = n_morans_vec, threshold_obs_species = 10)
+  RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 10)
   print(paste("Dim after filtering: ", paste(RDA.data %>% dim(), collapse = "x")))
  
   print(paste("removing multivariate outliers:", rem_multiv_out))
@@ -188,10 +235,15 @@ create_resp_expl_data <- function(
 
   mem_vec <- sapply(C(1:n_moran_vec), function(ith) {paste("MEM", ith, sep = "")})
 
-  resp <- RDA.data %>% dplyr::select(all_of(species)) %>% vegan::decostand("hellinger") %>% mutate(across(all_of(species), ~ . - mean(.)))
+  resp <- RDA.data %>% dplyr::select(all_of(species)) %>% mutate(across(everything(), ~ if (log_transform) log1p(.) else .))  %>% vegan::decostand("hellinger") %>% mutate(across(everything(), ~ . - mean(.)))
+
+  
   expl <- RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(c(covariates, mem_vec, temporal_factor)))
   return(list(resp = resp, expl = expl))
  }
+
+
+
 
 test_models <- function(
   env_data,
@@ -205,8 +257,9 @@ test_models <- function(
   rem_multiv_out = FALSE, 
   threshold_obs_species = 10,
   partial = FALSE, 
-  partial_covariates = NULL
-) {
+  partial_covariates = NULL, 
+  log_transform = FALSE
+  ) {
   
   data <- create_resp_expl_data(
     env_data,
@@ -218,7 +271,8 @@ test_models <- function(
     temporal_factor, 
     boxcox = boxcox, 
     rem_multiv_out = rem_multiv_out, 
-    threshold_obs_species = threshold_obs_species
+    threshold_obs_species = threshold_obs_species, 
+    log_transform = log_transform
   )
 
   if (partial) {
@@ -232,146 +286,220 @@ test_models <- function(
   return(RDA.model)
 }
 
+ggplot_rda <- function(mod, scaling = 2, fill_row = NULL) {
+  scores.sites <- scores(mod, display = "sites", choices = c(1, 2), scaling = scaling)
+  scores.species <- scores(mod, display = "species", choices = c(1, 2), scaling = scaling)
+  scores.covariates <- scores(mod, display = "bp", choices = c(1, 2), scaling = scaling)
+
+  p <- ggplot() + 
+  geom_point(
+    data = scores.sites,
+    aes(x = RDA1, y = RDA2, fill = fill_row), shape = 21, size = 3
+    ) +
+    geom_segment(
+      data = scores.species,
+      aes(x = 0, y = 0, xend = RDA1, yend = RDA2), colour = "black"
+    ) +
+    geom_segment(
+      data = scores.covariates,
+      aes(x = 0, y = 0, xend = RDA1, yend = RDA2),
+      arrow = arrow(length = unit(0.2, "cm")), colour = "blue"
+    ) +
+    geom_text(
+      data = scores.covariates,
+      aes(x = RDA1, y = RDA2, label = rownames(scores.covariates)),
+      hjust = 1.5, vjust = 1.5, colour = "blue"
+    ) +
+    theme_minimal() + 
+    theme(legend.position = "none")
+  return(p)
+}
 
 
 
 
+
+##VARIABLE SELECTION
 n_moran_vec <- 23 
-species <- unique(unlist(sapply(sheets, function(sheet) {indval_list[[sheet]] %>% filter(stat > 0.5)%>% rownames()}, simplify = TRUE)))
-RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 10)
-variable_selection(
-  RDA.data %>% dplyr::select(all_of(species)) %>% vegan::decostand("hellinger"), 
-  RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates))
-  )
-
 mem_vec <- sapply(C(1:n_moran_vec), function(ith) {paste("MEM", ith, sep = "")})
+species <- unique(unlist(sapply(sheets, function(sheet) {indval_list[[sheet]] %>% filter(stat > 0.5)%>% rownames()}, simplify = TRUE)))
+RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates_cop, species, n_moran_vec = n_moran_vec, threshold_obs_species = 10)
 variable_selection(
-  RDA.data %>% dplyr::select(all_of(species)) %>% vegan::decostand("hellinger"), 
+  RDA.data %>% dplyr::select(all_of(species)) %>% vegan::decostand("hellinger") %>% mutate(across(all_of(species), ~ . - mean(.))), 
+  RDA.data %>% dplyr::mutate(across(all_of(covariates_cop), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates_cop))
+  )
+variable_selection(
+  RDA.data %>% dplyr::select(all_of(species)) %>% vegan::decostand("hellinger") %>% mutate(across(all_of(species), ~ . - mean(.))), 
   RDA.data %>% dplyr::select(all_of(mem_vec))
   )
 
 
-data <- create_resp_expl_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = 23, temporal_factor = c("Season", "Year"), boxcox = FALSE, rem_multiv_out = FALSE, threshold_obs_species = 10)
+species_obs <- sites_taxa %>% dplyr::select(where(is.numeric) & !matches("Other.phytoplankton")) %>% mutate(across(where(is.numeric), ~ .>0)) %>% colSums()
+quantile(species_obs, probs = seq(0, 1, 0.1))
+species <- names(species_obs[species_obs > 10 & species_obs < 211])
+species <- unique(unlist(sapply(sheets, function(sheet) {indval_list[[sheet]] %>% filter(stat > 0.65)%>% rownames()}, simplify = TRUE)))
+length(species)
+
+
+#BUILDING THE FINAL MODEL
+data <- create_resp_expl_data(env_data, sites_taxa, morans, covariates_cop, species, n_moran_vec = 23, temporal_factor = "Season", boxcox = FALSE, rem_multiv_out = FALSE, threshold_obs_species = 5, log_transform = FALSE)
+RDA.model <- compute_rda_model(data$resp, data$expl, covariates = covariates_cop, partial = TRUE, partial_covariates = c(mem_vec, "Season"))
+
+RDA.model
+vegan::RsquareAdj(RDA.model)
+anova.cca(RDA.model, by = "margin")
+
+
+p <- ggplot_rda(RDA.model, scaling = 2, fill_row = as.factor(data$expl$Season))
+
+p <- ggplot() + 
+  geom_point(
+    data = scores(RDA.model, display = "sites", choices = c(1, 2), scaling = 2),
+    aes(x = RDA1, y = RDA2, fill = as.factor(data$expl$Season)) , shape = 21, size = 3
+    )
+plot(p)
+
+
+scores_sp <- scores(RDA.model, display = "species", scaling = 2)
+#compute norm rowwise
+scores_sp <- scores_sp %>% as.data.frame() %>% mutate(norm = sqrt(RDA1^2 + RDA2^2))
+scores_sp[, "norm"]
+scores_sp %>% arrange(desc(norm))
+barplot(scores_sp %>% arrange(desc(norm)) %>% pull(norm))
+
+#select first 4 rownames 
+
+
+resid <- cbind(residuals(RDA.model), 
+data$expl)
+
+##ggplot scateerplot first three columns againts T 
+high_score_species <- scores_sp %>% arrange(desc(norm)) %>% rownames() %>% head(7)
+resid_long <- resid %>% dplyr::select(all_of(c("Chla", high_score_species))) %>% 
+tidyr::pivot_longer(cols = high_score_species, names_to = "Variable", values_to = "Value")
+
+
+ggplot(resid_long, aes(x = Chla, y = Value, color = Variable)) +
+  geom_point() +
+  labs(x = "Chla", y = "Value", color = "Variable") +
+  theme_minimal()
+
+
+only_mem <- rda(data$resp ~ ., data$expl %>% dplyr::select(all_of(mem_vec)))
+mem_resid <- residuals(only_mem)
+resid[,c(1:3)] %>% head()
+mem_resid[,c(1:3)]  %>% head()
+plot(data$expl[["T"]], resid[,1])
+points(data$expl[["T"]], resid[,2])
+points(data$expl[["T"]], resid[,3])
+
+data$expl[["T"]] %>% sd()
+
+
+
+for (season in names(params$"seasons")) {
+  print(season)
+  data <- create_resp_expl_data(
+    env_data %>% filter(Season == season), 
+    sites_taxa, 
+    morans, 
+    covariates, 
+    species, 
+    n_moran_vec = 23, 
+    temporal_factor = "Season", 
+    boxcox = FALSE, 
+    rem_multiv_out = FALSE, 
+    threshold_obs_species = 10
+    )
+
+  RDA.model <- compute_rda_model(data$resp, data$expl , covariates = covariates, partial = TRUE, partial_covariates = mem_vec)
+  
+  p <- ggplot_rda(RDA.model, scaling = 2)
+  plot(p)
+}
+
+
+names(sites_taxa)
+
+env_data %>% head()
+species_obs <- sites_taxa %>% dplyr::select(where(is.numeric)) %>% mutate(across(where(is.numeric), ~ .>0)) %>% colSums()
+species <- names(species_obs[species_obs > 120])
+
+
+variation_partitioning <- data.frame(matrix(ncol=3,nrow=0, dimnames=list(NULL, c("Season", "Env", "Shared"))))
+for (region in unique(env_data$Region)) {
+  print(region)
+  RDA.data <- filter_merge_data(env_data %>% dplyr::filter(Region == region), sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 5)
+  print(paste("Dim. of set", paste(RDA.data %>% dim(), collapse = "x")))
+  if (nrow(RDA.data) < 30) {
+    next
+  }
+  varp <- vegan::varpart(
+  RDA.data %>% dplyr::select(all_of(species)), 
+  RDA.data %>% dplyr::select(Season), 
+  RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates)),
+  transfo = "hel"
+  )
+  var_expl <- setNames(data.frame(t(varp$part$indfract[c(1,2,3), "Adj.R.squared"]), row.names = region), c("Season", "Env", "Shared"))
+  variation_partitioning <- rbind(var_expl, variation_partitioning)
+}
+
+
+ggplot(variation_partitioning, aes(x = rownames(variation_partitioning),)) +
+  geom_col(aes(y = Env + Season + Shared, fill = "green")) +
+  geom_col(aes(y = Env + Season, fill = "red")) +
+  geom_col(aes(y = Env, fill = "blue")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+plot(varp)
+summary(varp)
+
+plot(varp, title = "AAA")
+
+
+as.data.frame(varp$indfract)
+
+
+varp$part$frac %>% data.frame()
 
 vpar <- varpart(
   data$resp, 
-  data$expl %>% dplyr::select(Year),
   data$expl %>% dplyr::select(Season), 
   data$expl %>% dplyr::select(all_of(covariates)),
   data$expl %>% dplyr::select(all_of(mem_vec))
 )
 
-vpar <- varpart(
-  data$resp, 
-  data$expl %>% dplyr::select(Year),
-  data$expl %>% dplyr::select(Season)
-)
-
-vpar <- varpart(
-  data$resp, 
-  data$expl %>% dplyr::select(Year),
-  data$expl %>% dplyr::select(all_of(covariates)),
-  data$expl %>% dplyr::select(all_of(mem_vec))
-)
-vpar$part$indfract
 plot(
   vpar, 
-  Xnames = c("Y", "S", "C", "M")
+  Xnames = c("S", "C", "M"), 
+
 )
 
-resp <- data$resp
-expl <- data$expl
-resp %>% head()
-anova.cca(rda(resp ~ Year + Condition(Season), expl))
-anova.cca(rda(resp ~ Season + Condition(Year), expl))
 
-mod <- test_models(env_data, sites_taxa, morans, covariates, species, n_moran_vec = 23, temporal_factor = "Season_year", boxcox = FALSE, rem_multiv_out = FALSE, threshold_obs_species = 10, partial = TRUE, partial_covariates = c(mem_vec, "Season_year"))
 
-anova.cca(mod)
-n_moran_vec <- 23 
-species_obs <- sites_taxa %>% dplyr::select(where(is.numeric)) %>% mutate(across(where(is.numeric), ~ .>0)) %>% colSums()
-species <- names(species_obs[species_obs > 170])
-RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 10)
+#dbRDa 
+species <- unique(unlist(sapply(sheets, function(sheet) {indval_list[[sheet]] %>% filter(stat > 0.5)%>% rownames()}, simplify = TRUE)))
 
-variable_selection(
-  RDA.data %>% dplyr::select(all_of(species)) %>% vegan::decostand("hellinger"), 
-  RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates))
-  )
-n_moran_vec <- 23 
+pecies_obs <- sites_taxa %>% dplyr::select(where(is.numeric) & !matches("Other.phytoplankton")) %>% mutate(across(where(is.numeric), ~ .>0)) %>% colSums()
+species <- names(species_obs[species_obs > 120])
+RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates_cop, species, n_moran_vec = 23, threshold_obs_species = 10)  
 mem_vec <- sapply(C(1:n_moran_vec), function(ith) {paste("MEM", ith, sep = "")})
-variable_selection(
-  RDA.data %>% dplyr::select(all_of(species)) %>% vegan::decostand("hellinger"), 
-  RDA.data %>% dplyr::select(all_of(mem_vec))
-  )
 
+resp <- RDA.data %>% dplyr::select(all_of(species)) %>% vegan::vegdist("bray", binary = FALSE)  
+expl <- RDA.data %>% dplyr::mutate(across(all_of(covariates_cop), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(c(covariates_cop, mem_vec, "Season")))
+partial_covariates <- c(mem_vec, "Season")
+RDA.model <- vegan::dbrda(formula(
+        paste(
+          "resp ~", paste(covariates_cop, collapse = " + "), 
+          "+ Condition(", 
+          paste(partial_covariates, collapse = " + "),
+          ")",
+          sep = " "
+        )
+      ), 
+    expl
+    )
 
-test_models(covariates, species, boxcox = TRUE, rem_multiv_out = FALSE)
-
-
-
-mod0 <- rda(resp ~ 1, expl)
-### forward selection: Salinity + T + TN + SiO4 + O_sat + PO4 + Chla + NH4 +      pH + NO2 + TP
-ordiR2step(mod0, RDA.model, perm.max = 200)
-### backward selection:  T + Salinity + O_sat + pH + Chla + NO3 + NO2 + NH4 + TN + PO4 + TP + SiO4
-ordistep(RDA.model, direction = "backward", perm.max = 200)
-
-
-
-
-
-
-mod0 <- rda(resp ~ 1, expl)
-### forward selection: TN + T + PO4 + Salinity + O_sat + SiO4 + TP + Chla + pH + NO2 + NH4 + NO3
-ordiR2step(mod0, RDA.model, perm.max = 200)
-### backward selection:  T + Salinity + O_sat + pH + Chla + NO3 + NO2 + NH4 + TN + PO4 + TP + SiO4
-ordistep(RDA.model, direction = "backward", perm.max = 200)
-
-
-
-
-
-## PARTIAL RDA
-resp <- RDA.data %>% dplyr::select(all_of(species)) %>% vegan::decostand("hellinger") %>% mutate(across(all_of(species), ~ . - mean(.)))
-expl <- RDA.data %>% dplyr::select(all_of(c(covariates, "Year", "Season"))) %>% dplyr::mutate(across(all_of(covariates), ~  decostand(.,"standardize"))) 
-RDA.pmodel <- rda(formula(paste("resp ~", paste(covariates, collapse = " + "), "+ Condition(Season)"), sep = " "), expl)
-summary(RDA.pmodel)
-RsquareAdj(RDA.pmodel)
-anova.cca(RDA.model, steps = 1000)
-
-
-resp <- RDA.data%>% dplyr::select(all_of(species)) %>% apply(2, function(x) {log(x+1)}) %>% vegan::decostand("hellinger") %>% data.frame() %>% mutate(across(all_of(species), ~ . - mean(.)))
-expl <- RDA.data %>% dplyr::select(all_of(c(covariates, "Year", "Season"))) %>% dplyr::mutate(across(all_of(covariates), ~  decostand(.,"standardize"))) 
-RDA.pmodel <- rda(formula(paste("resp ~", paste(covariates, collapse = " + "), "+ Condition(Season)"), sep = " "), expl)
-RsquareAdj(RDA.pmodel)
-summary(RDA.pmodel)
-
-
-summary(RDA.model)
-names(RDA.model)
-
-summary.rda
-
-RDA.model$tot.chi
-
-
-
-### morans eigen 
-n_moran_vec <- 23
-RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 10)
-
-
-varp <- vegan::varpart(
-  RDA.data%>% dplyr::select(all_of(species)), 
-  RDA.data %>% dplyr::select(all_of(mem_vec)), 
-  RDA.data %>% mutate(Season_year = as.factor(paste(Season, Year, sep = "_"))) %>% dplyr::select(Season_year), 
-  RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates)),
-  transfo = "hel"
-)
-
-summary(varp)
-
-plot(varp)
-
-
-
-
+RDA.model
