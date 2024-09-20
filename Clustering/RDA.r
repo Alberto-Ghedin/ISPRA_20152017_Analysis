@@ -39,7 +39,6 @@ env_data <- merge(env_data, closest_coast, by = "id")
 
 
 species <- unique(unlist(sapply(sheets, function(sheet) {indval_list[[sheet]] %>% filter(stat > 0.5)%>% rownames()}, simplify = TRUE)))
-
 species_obs <- sites_taxa %>% dplyr::select(where(is.numeric)) %>% mutate(across(where(is.numeric), ~ .>0)) %>% colSums()
 species <- names(species_obs[species_obs > 170])
 
@@ -56,7 +55,7 @@ covariates <- c(
   "Salinity",
   "O_sat",
   "pH",
-  "Chla",
+  "Chla",                        
   "NO3",
   "NO2",
   "NH4",
@@ -226,32 +225,6 @@ for (season in names(params$"seasons")) {
 }
 
 
-
-species <- unique(unlist(sapply(sheets, function(sheet) {indval_list[[sheet]] %>% filter(stat > 0.5)%>% rownames()}, simplify = TRUE)))
-species_obs <- sites_taxa %>% dplyr::select(where(is.numeric)) %>% mutate(across(where(is.numeric), ~ .>0)) %>% colSums()
-species <- names(species_obs[species_obs > 120])
-
-n_moran_vec <- 23 
-variation_partitioning <- data.frame(matrix(ncol=3,nrow=0, dimnames=list(NULL, c("Season", "Env", "Shared"))))
-regions <- unique(env_data$Region)
-for (region in regions) {
-  print(region)
-  RDA.data <- filter_merge_data(env_data %>% dplyr::filter(Region == region), sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 5)
-  print(paste("Dim. of set", paste(RDA.data %>% dim(), collapse = "x")))
-  if (nrow(RDA.data) < 30) {
-    next
-  }
-  varp <- vegan::varpart(
-  RDA.data %>% dplyr::select(all_of(species)), 
-  RDA.data %>% dplyr::select(Season), 
-  RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates)),
-  transfo = "hel"
-  )
-  var_expl <- setNames(data.frame(t(varp$part$indfract[c(1,2,3), "Adj.R.squared"]), row.names = region), c("Season", "Env", "Shared"))
-  variation_partitioning <- rbind(var_expl, variation_partitioning)
-}
-
-
 ggplot(variation_partitioning, aes(x = rownames(variation_partitioning),)) +
   geom_col(aes(y = Env + Season + Shared, fill = "green")) +
   geom_col(aes(y = Env + Season, fill = "red")) +
@@ -313,25 +286,91 @@ RDA.model <- vegan::dbrda(formula(
 RDA.model
 
 
-RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 5)
-data <- create_resp_expl_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = 23, temporal_factor = "Season", boxcox = FALSE, rem_multiv_out = FALSE, threshold_obs_species = 5, log_transform = FALSE)
+
+specie <- c(rep("sorgho" , 3) , rep("poacee" , 3) , rep("banana" , 3) , rep("triticum" , 3) )
+condition <- rep(c("normal" , "stress" , "Nitrogen") , 4)
+value <- abs(rnorm(12 , 0 , 15))
+data <- data.frame(specie,condition,value)
+data
+
+#VARIATION PARTITIONING OF ALL MODELS
+adj_r2 <- list()
+effect <- list()
+model <- list()
+#species <- unique(unlist(sapply(sheets, function(sheet) {indval_list[[sheet]] %>% filter(stat > 0.5)%>% rownames()}, simplify = TRUE)))
+species_obs <- sites_taxa %>% dplyr::select(where(is.numeric) & !matches("Other.phytoplankton")) %>% mutate(across(where(is.numeric), ~ .>0)) %>% colSums()
+species <- names(species_obs[species_obs > 170])
+n_moran_vec <- 23 
 mem_vec <- sapply(C(1:n_moran_vec), function(ith) {paste("MEM", ith, sep = "")})
 
 
-vpar <- varpart(
-  data$resp, 
-  data$expl %>% dplyr::select(Season), 
-  data$expl %>% dplyr::select(all_of(covariates)),
-  data$expl %>% dplyr::select(all_of(mem_vec))
+##FULL MODEL###
+RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 5)
+
+varp <- vegan::varpart(
+  RDA.data %>% dplyr::select(all_of(species)), 
+  RDA.data %>% dplyr::select(all_of(mem_vec)),
+  RDA.data %>% dplyr::select(Season), 
+  RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates)),
+  transfo = "hel"
 )
 
-pdf("variation_partitioning.pdf", width = 8, height = 6)
-plot(
-  vpar, 
-  Xnames = c("Season", "Env. variables", "MEM"), 
-  main = "Variation Partitioning",
-  xlab = "Components",
-  ylab = "Percentage of Variation Explained", 
-  bg = c("red", "blue", "green")
+adj_r2 <- unlist(c(adj_r2,  varp$part$indfract[, "Adj.R.square"]))
+effect <- unlist(c(effect, c("MEM", "Season", "Env", "MEM + Season", "MEM + Env", "Season + Env", "MEM + Season + Env", "Residual")))
+model <- unlist(c(model, rep("Full", length(varp$part$indfract[, "Adj.R.square"]))))
+
+
+
+##MODEL PER SEASON###
+for (season in names(params$"seasons")) {
+  print(season)
+  RDA.data <- filter_merge_data(env_data %>% dplyr::filter(Season == season), sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 5)
+  varp <- vegan::varpart(
+    RDA.data %>% dplyr::select(all_of(species)), 
+    RDA.data %>% dplyr::select(all_of(mem_vec)),
+    RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates)),
+    transfo = "hel"
+  )
+  adj_r2 <- unlist(c(adj_r2,  varp$part$indfract[, "Adj.R.squared"]))
+  effect <- unlist(c(effect, c("MEM", "Env", "MEM + Env", "Residual")))
+  model <- unlist(c(model, rep(season, length(varp$part$indfract[, "Adj.R.squared"]))))
+}
+
+##MODEL PER REGION###
+regions <- unique(env_data$Region)
+for (region in regions) {
+  print(region)
+  RDA.data <- filter_merge_data(env_data %>% dplyr::filter(Region == region), sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 5)
+  print(paste("Dim. of set", paste(RDA.data %>% dim(), collapse = "x")))
+  if (nrow(RDA.data) < 30) {
+    next
+  }
+  varp <- vegan::varpart(
+  RDA.data %>% dplyr::select(all_of(species)), 
+  RDA.data %>% dplyr::select(Season), 
+  RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates)),
+  transfo = "hel"
+  )
+  adj_r2 <- unlist(c(adj_r2,  varp$part$indfract[, "Adj.R.squared"]))
+  effect <- unlist(c(effect, c("Season", "Env", "Season + Env", "Residual")))
+  model <- unlist(c(model, rep(region, length(varp$part$indfract[, "Adj.R.squared"]))))
+}
+
+##MODEL WITH BRAY CURTIS DISTANCE###
+varp <- vegan::varpart(
+  RDA.data %>% dplyr::select(all_of(mem_vec)),
+  RDA.data %>% dplyr::select(Season), 
+  RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(covariates))
 )
-dev.off()
+
+adj_r2 <- unlist(c(adj_r2,  varp$part$indfract[, "Adj.R.squared"]))
+effect <- unlist(c(effect, c("Season", "Env", "Season + Env", "Residual")))
+model <- unlist(c(model, rep("Bray-Curtis", length(varp$part$indfract[, "Adj.R.squared"]))))
+
+
+variation <- data.frame(adj_r2 = adj_r2, effect = effect, model = model)
+
+variation <- variation %>% mutate(adj_r2 = ifelse(adj_r2 < 0, 0, adj_r2))
+
+ggplot(variation, aes(fill=effect, y=adj_r2, x=model)) + 
+    geom_bar(position="fill", stat="identity")
