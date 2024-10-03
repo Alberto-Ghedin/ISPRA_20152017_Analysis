@@ -19,14 +19,18 @@ rownames(basins) <- basins$id
 
 sites_taxa %>% head()
 
-result <- multipatt(sites_taxa %>% select(-c(Date, id, Unknown)), basins[sites_taxa %>% pull(id), "Basin"], func = "IndVal.g", duleg = TRUE, restcomb = NULL)$sign
+result <- multipatt(sites_taxa %>% select(-c(Date, id, Unknown)), basins[sites_taxa %>% pull(id), "Basin"], func = "IndVal.g", duleg = TRUE, restcomb = NULL)[c("str", "sign")]
+mat <- multipatt(sites_taxa %>% select(-c(Date, id, Unknown)), basins[sites_taxa %>% pull(id), "Basin"], func = "IndVal.g", duleg = TRUE, restcomb = NULL)$str
 
+taxa <- result$sign %>% filter(stat > 0.5) %>% select(index, stat, p.value) %>% arrange(index) %>% rownames()
+result$str %>% 
+    as.data.frame() %>% 
+    filter(rownames(.) %in% taxa) %>% 
+    mutate(across(everything(), ~ round(., 3))) %>% 
+    select(c(NordAdr, SouthAdr, Ion, SouthTyr, Lig, WestMed)) %>%
+    write.csv(paste(HOME_, "ISPRA_20152017_Analysis/Description/indval_along_basins.csv", sep = "/"), row.names = TRUE)
 df <- result %>% filter(stat > 0.5, p.value <= 0.05) %>% select(index, stat, p.value) %>% arrange(index)
 
-result
 
-index_to_basin <- c("Ion", "Lig","NordAdr", "SouthAdr", "SouthTyr", "WestMed")
-index_to_basin
-df %>% mutate(basin = index_to_basin[index]) %>% select(basin, stat, p.value) %>% write.csv(paste(HOME_, "ISPRA_20152017_Analysis/Description/indval_per_basin.csv", sep = "/"), row.names = TRUE)
 
-index_to_basin[1]
+test <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/Description/indval_along_basins.csv", sep = "/"), row.names =1)
