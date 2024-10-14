@@ -63,8 +63,8 @@ covariates <- c(
   "TN",
   "PO4",
   "TP",
-  "SiO4", 
-  "Closest_coast"
+  "SiO4"#, 
+  #"Closest_coast"
 )
 
 all_nutrients <- c(
@@ -311,3 +311,27 @@ RDA.model <- vegan::dbrda(formula(
     )
 
 RDA.model
+
+
+RDA.data <- filter_merge_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = n_moran_vec, threshold_obs_species = 5)
+data <- create_resp_expl_data(env_data, sites_taxa, morans, covariates, species, n_moran_vec = 23, temporal_factor = "Season", boxcox = FALSE, rem_multiv_out = FALSE, threshold_obs_species = 5, log_transform = FALSE)
+mem_vec <- sapply(C(1:n_moran_vec), function(ith) {paste("MEM", ith, sep = "")})
+
+
+vpar <- varpart(
+  data$resp, 
+  data$expl %>% dplyr::select(Season), 
+  data$expl %>% dplyr::select(all_of(covariates)),
+  data$expl %>% dplyr::select(all_of(mem_vec))
+)
+
+pdf("variation_partitioning.pdf", width = 8, height = 6)
+plot(
+  vpar, 
+  Xnames = c("Season", "Env. variables", "MEM"), 
+  main = "Variation Partitioning",
+  xlab = "Components",
+  ylab = "Percentage of Variation Explained", 
+  bg = c("red", "blue", "green")
+)
+dev.off()
