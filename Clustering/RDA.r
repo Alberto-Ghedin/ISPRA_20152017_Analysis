@@ -62,8 +62,8 @@ covariates <- c(
   "TN",
   "PO4",
   "TP",
-  "SiO4", 
-  "Closest_coast"
+  "SiO4"#, 
+  #"Closest_coast"
 )
 
 all_nutrients <- c(
