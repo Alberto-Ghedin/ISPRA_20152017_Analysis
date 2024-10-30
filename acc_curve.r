@@ -57,6 +57,7 @@ for (region in regions) {
         incidence_freq_list[[region]] <- incidence_freq_dataframe
 }
 res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = 200)
+res$iNextEst
 write.csv(res$iNextEst$size_based, paste(HOME_, "ISPRA_20152017_Analysis/acc_curve_all_regions_all_taxa.csv", sep = "/"))
 
 
@@ -76,7 +77,7 @@ res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.9
 write.csv(res$iNextEst$size_based, paste(HOME_, "ISPRA_20152017_Analysis/acc_curve_all_regions_only_species.csv", sep = "/"))
 
 
-
+acc_curve.size_based <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/acc_curve_all_regions_all_taxa.csv", sep = "/")) %>% rename(Region = Assemblage) 
 acc_curve.size_based <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/acc_curve_all_regions_only_species.csv", sep = "/")) %>% rename(Region = Assemblage) 
 
 capitalize_first <- function(string) {
