@@ -129,6 +129,37 @@ make_raref_plot_richness <- function(acc_curve, plot_title, taxon_level = "Taxa"
 
 make_raref_plot_richness(acc_curve.size_based, "acc_curve_all_regions_only_species.pdf", "Species")
 
+taxon_level <- "Species"
+plot_path <- paste(HOME_, "Paper_1", sep = "/")
+acc_curve <- acc_curve.size_based
+acculumated_richness <- acc_curve %>%
+  group_by(Region) %>%
+  filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1)
+acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "CAM","LAZ", "TOS", "LIG", "SIC", "SAR"))
+
+custom_palette <- scales::hue_pal()(length(unique(acculumated_richness$Region)))
+names(custom_palette) <- unique(acculumated_richness$Region)
+
+
+p <- ggplot(acculumated_richness) + 
+    geom_bar(stat = "identity", aes(x = Region, y = qD, fill = Region), size = 3, colour = "black", linewidth = 1) +
+    geom_errorbar(aes(x = Region, ymin = qD.LCL, ymax = qD.UCL), linewidth = 0.5, width = 0.5)  +
+    theme_bw(base_size = 18) +
+    scale_color_manual(values = custom_palette) +
+    labs(x = "Region", y = paste("Estimated", tolower(taxon_level), "richness", sep = " ")) +
+    theme(legend.position = "none") +
+    theme(
+    panel.background = element_rect(fill = "#F5F5F5"),
+    plot.title = element_text(hjust = 0.5, face = "bold"), 
+    axis.text.x = element_text(size = 20), 
+    axis.text.y = element_text(size = 20),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25), 
+    panel.border = element_rect(colour = "black", fill=NA, linewidth=1)
+    ) 
+p
+plot_title <- "acc_curve_all_regions_only_species_bar.pdf"
+ggsave(paste(plot_path, plot_title, sep = "/"), p, width = 15, height = 10)
 
 #original plots
 N <- length(incidence_freq_list)
