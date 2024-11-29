@@ -88,7 +88,7 @@ make_raref_plot_richness <- function(acc_curve, plot_title, taxon_level = "Taxa"
   acculumated_richness <- acc_curve %>%
   group_by(Region) %>%
   filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1)
-  acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "CAM","LAZ", "TOS", "LIG", "SIC", "SAR"))
+  acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "SIC", "CAM","LAZ", "TOS", "LIG",  "SAR"))
 
   custom_palette <- scales::hue_pal()(length(unique(acculumated_richness$Region)))
   names(custom_palette) <- unique(acculumated_richness$Region)
@@ -130,22 +130,22 @@ make_raref_plot_richness <- function(acc_curve, plot_title, taxon_level = "Taxa"
 make_raref_plot_richness(acc_curve.size_based, "acc_curve_all_regions_only_species.pdf", "Species")
 
 taxon_level <- "Species"
-plot_path <- paste(HOME_, "Paper_1", sep = "/")
+plot_path <- "."
 acc_curve <- acc_curve.size_based
 acculumated_richness <- acc_curve %>%
   group_by(Region) %>%
   filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1)
-acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "CAM","LAZ", "TOS", "LIG", "SIC", "SAR"))
+acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "SIC", "CAM","LAZ", "TOS", "LIG", "SAR"))
 
-custom_palette <- scales::hue_pal()(length(unique(acculumated_richness$Region)))
+custom_palette <- rep("dodgerblue3", length(unique(acculumated_richness$Region)))
 names(custom_palette) <- unique(acculumated_richness$Region)
 
 
 p <- ggplot(acculumated_richness) + 
-    geom_bar(stat = "identity", aes(x = Region, y = qD, fill = Region), size = 3, colour = "black", linewidth = 1) +
+    geom_bar(stat = "identity", aes(x = Region, y = qD, fill = Region), colour = "black", linewidth = 1) +
     geom_errorbar(aes(x = Region, ymin = qD.LCL, ymax = qD.UCL), linewidth = 0.5, width = 0.5)  +
     theme_bw(base_size = 18) +
-    scale_color_manual(values = custom_palette) +
+    scale_fill_manual(values = custom_palette) +
     labs(x = "Region", y = paste("Estimated", tolower(taxon_level), "richness", sep = " ")) +
     theme(legend.position = "none") +
     theme(
