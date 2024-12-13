@@ -11,11 +11,7 @@ library(scales)
 # Load data
 HOME_ <- "."
 
-sheet_names <- getSheetNames(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"))
-
-data <- list()  # Create an empty list to store the data from each sheet
-data <- lapply(sheet_names, function(sheet) read.xlsx(paste(HOME_, "ISPRA_20152017_Analysis/eco_matrix_region.xlsx", sep = "/"), sheet = sheet))
-names(data) <-  sheet_names
+data <- read.csv(paste(HOME_, "sites_taxa.csv", sep = "/"))
 
 plot_path <- paste(HOME_, "ISPRA_20152017_Analysis/Plots/Rich_levels/Acc_curve", sep = "/")
 dir.create(plot_path, recursive = TRUE, showWarnings = FALSE)
@@ -35,6 +31,7 @@ for (region in names(data)) {
         ggiNEXT(res, type=1, color.var="Assemblage") + theme_bw(base_size = 18)
         ggsave(paste(plot_path, "/acc_curve_", region, ".png", sep = ""), width = 10, height = 10)
 }
+
 
 data <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/site_taxa_matrix_w_det_level.csv", sep = "/"))
 data[1, c(1,2,3)] <- data[2, c(1,2,3)]
@@ -75,6 +72,31 @@ for (region in regions) {
 }
 res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = 200)
 write.csv(res$iNextEst$size_based, paste(HOME_, "ISPRA_20152017_Analysis/acc_curve_all_regions_only_species.csv", sep = "/"))
+
+
+# SACs for genera
+phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
+genus_observation <- phyto_abund %>% 
+filter(Det_level == "Genus" | Det_level == "Species") %>% 
+group_by(Region, Date, id, Genus) %>% summarise(Abund = sum(Num_cell_l)) %>% 
+pivot_wider( names_from = Genus, values_from = Abund, values_fill = 0) %>% ungroup()
+incidence_freq_list <- list()
+
+for (region in unique(genus_observation$Region)) {
+  regional_df <- genus_observation %>% filter(Region == region)
+  incidence_freq_dataframe <- merge(
+      regional_df %>% summarise(n_samples = n_distinct(id, Date)),
+      regional_df %>% select(-c(id, Date, Region)) %>% summarise_all(~sum(. != 0))
+      )
+  incidence_freq_dataframe <- incidence_freq_dataframe %>% .[. != 0]
+  incidence_freq_list[[region]] <- incidence_freq_dataframe
+}
+endpoint <- genus_observation %>% group_by(Region) %>% summarise(n_samples = n_distinct(id, Date)) %>% pull(n_samples) %>% max() + 10
+incidence_freq_list
+res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = endpoint)
+res$iNextEst
+write.csv(res$iNextEst$size_based, paste(HOME_, "acc_curve_all_regions_only_genera.csv", sep = "/"))
+
 
 
 acc_curve.size_based <- read.csv(paste(HOME_, "ISPRA_20152017_Analysis/acc_curve_all_regions_all_taxa.csv", sep = "/")) %>% rename(Region = Assemblage) 
@@ -136,11 +158,8 @@ acculumated_richness <- acc_curve %>%
   group_by(Region) %>%
   filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1)
 acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "SIC", "CAM","LAZ", "TOS", "LIG", "SAR"))
-
 custom_palette <- rep("dodgerblue3", length(unique(acculumated_richness$Region)))
 names(custom_palette) <- unique(acculumated_richness$Region)
-
-
 p <- ggplot(acculumated_richness) + 
     geom_bar(stat = "identity", aes(x = Region, y = qD, fill = Region), colour = "black", linewidth = 1) +
     geom_errorbar(aes(x = Region, ymin = qD.LCL, ymax = qD.UCL), linewidth = 0.5, width = 0.5)  +
@@ -161,6 +180,105 @@ p
 plot_title <- "acc_curve_all_regions_only_species_bar.pdf"
 ggsave(paste(plot_path, plot_title, sep = "/"), p, width = 15, height = 10)
 
+
+acc_curve.size_based <- read.csv(paste(HOME_, "acc_curve_all_regions_only_genera.csv", sep = "/")) %>% rename(Region = Assemblage) 
+taxon_level <- "Genera"
+plot_path <- "."
+acc_curve <- acc_curve.size_based
+acculumated_richness <- acc_curve %>%
+  group_by(Region) %>%
+  filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1)
+acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "SIC", "CAM","LAZ", "TOS", "LIG", "SAR"))
+custom_palette <- rep("dodgerblue3", length(unique(acculumated_richness$Region)))
+names(custom_palette) <- unique(acculumated_richness$Region)
+p <- ggplot(acculumated_richness) + 
+    geom_bar(stat = "identity", aes(x = Region, y = qD, fill = Region), colour = "black", linewidth = 1) +
+    geom_errorbar(aes(x = Region, ymin = qD.LCL, ymax = qD.UCL), linewidth = 0.5, width = 0.5)  +
+    theme_bw(base_size = 18) +
+    scale_fill_manual(values = custom_palette) +
+    labs(x = "Region", y = paste("Estimated", tolower(taxon_level), "richness", sep = " ")) +
+    theme(legend.position = "none") +
+    theme(
+    panel.background = element_rect(fill = "#F5F5F5"),
+    plot.title = element_text(hjust = 0.5, face = "bold"), 
+    axis.text.x = element_text(size = 20), 
+    axis.text.y = element_text(size = 20),
+    axis.title.x = element_text(size = 25),
+    axis.title.y = element_text(size = 25), 
+    panel.border = element_rect(colour = "black", fill=NA, linewidth=1)
+    ) 
+p
+plot_title <- "acc_curve_all_regions_only_genera_bar.pdf"
+ggsave(paste(plot_path, plot_title, sep = "/"), p, width = 15, height = 10)
+
+
+acc_curve.size_based <- read.csv(paste(HOME_, "acc_curve_all_regions_only_genera.csv", sep = "/")) %>% rename(Region = Assemblage) 
+acc_curve_genera <- acc_curve.size_based
+acc_curve.size_based <- read.csv(paste(HOME_, "acc_curve_all_regions_only_species.csv", sep = "/")) %>% rename(Region = Assemblage) 
+acc_curve_species <- acc_curve.size_based
+taxon_level <- "Genera"
+plot_path <- "."
+
+acc_curve_genera %>%
+  group_by(Region) %>%
+  filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1) 
+acculumated_richness <- rbind(
+  acc_curve_genera %>%
+  group_by(Region) %>%
+  filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1) %>% 
+  mutate(Level = "Genera") , 
+  acc_curve_species %>%
+  group_by(Region) %>%
+  filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1) %>% 
+  mutate(Level = "Species") 
+)
+
+acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "SIC", "CAM","LAZ", "TOS", "LIG", "SAR"))
+
+
+p <- ggplot(acculumated_richness) + 
+    geom_point(aes(x = Region, y = qD, color = Level), size = 7) +
+    geom_errorbar(aes(x = Region, ymin = qD.LCL, ymax = qD.UCL, color = Taxon), width = 0.5)  +
+    theme_bw(base_size = 18) +
+    #scale_color_manual(values = custom_palette) +
+    labs(x = "Region", y = paste("Estimated", tolower(taxon_level), "richness", sep = " ")) +
+    theme(
+      axis.title.x = element_text(size = 20),
+      axis.title.y = element_text(size = 20),
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15)
+    )
+p
+custom_palette <- rep("black", length(unique(acculumated_richness$Region)))
+names(custom_palette) <- unique(acculumated_richness$Region)
+p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Region)) + 
+    geom_bar(stat = "identity", position = position_dodge(), aes(y = qD, fill = Level), colour = "black", size = 1, alpha = 1) +
+    geom_errorbar(aes(ymin = qD.LCL, ymax = qD.UCL, group = Level), width = 0.5, position = position_dodge(width = 1))  +
+    theme_bw(base_size = 18) +
+    #scale_color_manual(values = custom_palette) +
+    labs(x = "Region", y = "Estimated richness") +
+    ggtitle("Estimated richness of species and genera") +
+    theme(
+      axis.title.x = element_text(size = 20),
+      axis.title.y = element_text(size = 20),
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15), 
+      legend.text = element_text(size = 15),
+      #legend.title = element_text(size = 18, face = "bold"), 
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 25),
+      legend.position = "bottom",
+      legend.title = element_blank(), 
+      legend.margin=margin(0,0,0,0),
+      legend.box.margin=margin(t = -10)
+    )
+p
+plot_title <- "acc_curve_all_regions_genera_species_bar.pdf"
+ggsave(paste(plot_path, plot_title, sep = "/"), p, width = 15, height = 10)
+
+
+
+
+acculumated_richness
 #original plots
 N <- length(incidence_freq_list)
 ggiNEXT(res, type=1, color.var="Assemblage") + theme_bw(base_size = 18) + 
@@ -170,7 +288,15 @@ scale_shape_manual(values=rep(19,length(incidence_freq_list))) +
  guides(shape=FALSE)
 ggsave(paste(plot_path, "/acc_curve_all_regions.png", sep = ""), width = 20, height = 10)
 
-res
+
+acculumated_richness 
+
+merge(genus_observation %>% group_by(Region) %>%
+summarise(n_samples = n_distinct(id, Date), n_stations = n_distinct(id)), 
+acculumated_richness  %>% select(Region, qD, Level)
+) %>% ggplot() + 
+geom_point(aes(x = n_samples, y = qD, shape = Level, color = Level), size = 5)
+
 res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 1, conf = 0.95, endpoint = 200)
 ggiNEXT(res, type=1, color.var="Assemblage") + theme_bw(base_size = 18) + 
 scale_shape_manual(values=rep(19,length(incidence_freq_list))) + 
