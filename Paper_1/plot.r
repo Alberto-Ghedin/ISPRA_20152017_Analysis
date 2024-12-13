@@ -248,11 +248,12 @@ cat_contribution <- phyto_abund %>%
     )
 
 cat_contribution$Det_level <- factor(cat_contribution$Det_level, levels = c("Species", "Genus", "Higher cat.", "Unknown"))
+cat_contribution$Region <- factor(cat_contribution$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
 p <- ggplot(cat_contribution, aes(x = Region, y = rel_cont, fill = Det_level)) +
     #scale_y_continuous(labels = scales::percent) + 
     scale_fill_manual(values = c("Species" = "#1B9E77", "Genus" = "#D95F02", "Higher cat." = "#7570B3", "Unknown" = "black")) +
     geom_bar(stat = "identity", color = "black", linewidth = 1) +
-    labs(x = "Region", y = "Proportion of abundance", fill = "Identification level") +
+    labs(x = "Region", y = "Proportion of abundance", fill = "Identification \n level") +
     theme_minimal() +
     ggtitle("Average contribuion of each identification level to the sample abundance in each region") +
     #scale_fill_manual()
@@ -264,15 +265,15 @@ p <- ggplot(cat_contribution, aes(x = Region, y = rel_cont, fill = Det_level)) +
         axis.title.x = element_text(size = 25),
         strip.text = element_text(size = 20),
         plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
-        legend.text = element_text(size = 20),
-        legend.title = element_text(size = 20)
+        legend.text = element_text(size = 25),
+        legend.title = element_text(size = 25, face = "bold"),
         #legend.position = "none", 
         #strip.text.x = element_text(size = 16), 
         #strip.text.y = element_text(size = 16), 
         #panel.spacing = unit(1, "lines")
     ) 
 p
-ggsave(file.path(HOME_, "relative_abundance_per_region.pdf"), p, width = 22, height = 13, dpi = 300)
+ggsave(file.path(HOME_, "lebundance_per_region.pdf"), p, width = 22, height = 13, dpi = 300)
 
 
 p <- ggplot(abund) + 
@@ -423,8 +424,8 @@ maps[[1]] <- grid.grabExpr(
         show_row_names = FALSE,
         column_names_rot = 45, 
         row_title = "Taxon",
-        row_title_gp = gpar(fontsize = 18),
-        column_names_gp = gpar(fontsize = 18),
+        row_title_gp = gpar(fontsize = 20),
+        column_names_gp = gpar(fontsize = 20),
         row_title_rot = 90,
         show_heatmap_legend = FALSE
         )
@@ -442,8 +443,8 @@ maps[[2]] <- grid.grabExpr(
         show_column_names = TRUE,
         show_row_names = TRUE,
         column_names_rot = 45, 
-        row_names_gp = gpar(fontsize = 18),
-        column_names_gp = gpar(fontsize = 18),
+        row_names_gp = gpar(fontsize = 20, fontface = "italic"),
+        column_names_gp = gpar(fontsize = 20),
         row_title_rot = 90,
         row_names_side = "left",
         heatmap_legend_param = list(
@@ -452,8 +453,8 @@ maps[[2]] <- grid.grabExpr(
             legend_width = unit(0.5, "inch"), 
             legend_height = unit(4, "inch"), 
             title_position = "topcenter",
-            title_gp = gpar(fontsize = 20, fontface = "bold"),
-            labels_gp = gpar(fontsize = 15), 
+            title_gp = gpar(fontsize = 25, fontface = "bold", lheight = 5),
+            labels_gp = gpar(fontsize = 20), 
             grid_width = unit(0.5, "inch")
             ),
         width = unit(8, "inch"),
@@ -479,7 +480,7 @@ grid.newpage()
 grid.draw(combined_plot)
 grid.draw(text_grob_a)
 grid.draw(text_grob_b)
-ggsave(file.path(HOME_, "IndVal_per_basin.pdf"), plot = grid.grab(), width = 22, height = 15, dpi = 600)
+ggsave(file.path(HOME_, "IndVal_per_basin.pdf"), plot = grid.grab(), width = 22, height = 13, dpi = 600)
 
 
 
