@@ -305,3 +305,106 @@ scale_colour_manual(values = unname(alphabet(N))) +
 guides(shape=FALSE)
 
 res$iNextEst$size_based %>% filter(between(SC, 0.90,0.95))
+
+
+
+##PER BASIN##
+phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
+genus_observation <- phyto_abund %>% 
+filter(Det_level == "Genus" | Det_level == "Species") %>% 
+group_by(Basin, Date, id, Genus) %>% summarise(Abund = sum(Num_cell_l)) %>% 
+pivot_wider( names_from = Genus, values_from = Abund, values_fill = 0) %>% ungroup()
+species_observation <- phyto_abund %>%
+filter(Det_level == "Species") %>%
+group_by(Basin, Date, id, Taxon) %>% summarise(Abund = sum(Num_cell_l)) %>%
+pivot_wider( names_from = Taxon, values_from = Abund, values_fill = 0) %>% ungroup()
+
+incidence_freq_list <- list()
+for (basin in unique(genus_observation$Basin)) {
+  basin_df <- genus_observation %>% filter(Basin == basin)
+  incidence_freq_dataframe <- merge(
+      basin_df %>% summarise(n_samples = n_distinct(id, Date)),
+      basin_df %>% select(-c(id, Date, Basin)) %>% summarise_all(~sum(. != 0))
+      )
+  incidence_freq_dataframe <- incidence_freq_dataframe %>% .[. != 0]
+  incidence_freq_list[[basin]] <- incidence_freq_dataframe
+}
+endpoint <- genus_observation %>% group_by(Basin) %>% summarise(n_samples = n_distinct(id, Date)) %>% pull(n_samples) %>% max() + 10
+res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = endpoint)
+write.csv(res$iNextEst$size_based, paste(HOME_, "acc_curve_basins_only_genera.csv", sep = "/"))
+
+incidence_freq_list <- list()
+for (basin in unique(species_observation$Basin)) {
+  basin_df <- species_observation %>% filter(Basin == basin)
+  incidence_freq_dataframe <- merge(
+      basin_df %>% summarise(n_samples = n_distinct(id, Date)),
+      basin_df %>% select(-c(id, Date, Basin)) %>% summarise_all(~sum(. != 0))
+      )
+  incidence_freq_dataframe <- incidence_freq_dataframe %>% .[. != 0]
+  incidence_freq_list[[basin]] <- incidence_freq_dataframe
+}
+endpoint <- species_observation %>% group_by(Basin) %>% summarise(n_samples = n_distinct(id, Date)) %>% pull(n_samples) %>% max() + 10
+res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = endpoint)
+write.csv(res$iNextEst$size_based, paste(HOME_, "acc_curve_basins_only_species.csv", sep = "/"))
+res
+ggiNEXT(res, type=1, color.var="Assemblage")
+
+acc_curve_genera <- read.csv(paste(HOME_, "acc_curve_basins_only_genera.csv", sep = "/")) %>% rename(Basin = Assemblage) 
+acc_curve_species <- read.csv(paste(HOME_, "acc_curve_basins_only_species.csv", sep = "/")) %>% rename(Basin = Assemblage) 
+
+taxon_level <- "Genera"
+plot_path <- "."
+
+
+acculumated_richness <- rbind(
+  acc_curve_genera %>%
+  group_by(Basin) %>%
+  filter(abs(t - 300) == min(abs(t - 300))) %>% slice(1) %>% 
+  mutate(Level = "Genera") , 
+  acc_curve_species %>%
+  group_by(Basin) %>%
+  filter(abs(t - 300) == min(abs(t - 300))) %>% slice(1) %>% 
+  mutate(Level = "Species") 
+)
+
+acculumated_richness$Basin <- factor(acculumated_richness$Basin, levels = c("NorthAdr", "SouthAdr", "Ion", "SouthTyr", "NorthTyr", "WestMed"))
+
+
+p <- ggplot(acculumated_richness) + 
+    geom_point(aes(x = Basin, y = qD, color = Level), size = 7) +
+    geom_errorbar(aes(x = Region, ymin = qD.LCL, ymax = qD.UCL, color = Taxon), width = 0.5)  +
+    theme_bw(base_size = 18) +
+    #scale_color_manual(values = custom_palette) +
+    labs(x = "Region", y = paste("Estimated", tolower(taxon_level), "richness", sep = " ")) +
+    theme(
+      axis.title.x = element_text(size = 20),
+      axis.title.y = element_text(size = 20),
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15)
+    )
+p
+custom_palette <- rep("black", length(unique(acculumated_richness$Basin)))
+names(custom_palette) <- unique(acculumated_richness$Basin)
+p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Basin)) + 
+    geom_bar(stat = "identity", position = position_dodge(), aes(y = qD, fill = Level), colour = "black", linewidth = 1, alpha = 1) +
+    geom_errorbar(aes(ymin = qD.LCL, ymax = qD.UCL, group = Level), width = 0.5, position = position_dodge(width = 1))  +
+    theme_bw(base_size = 18) +
+    #scale_color_manual(values = custom_palette) +
+    labs(x = "Basin", y = "Estimated richness") +
+    ggtitle("Estimated richness of species and genera") +
+    theme(
+      axis.title.x = element_text(size = 20),
+      axis.title.y = element_text(size = 20),
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15), 
+      legend.text = element_text(size = 15),
+      #legend.title = element_text(size = 18, face = "bold"), 
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 25),
+      legend.position = "bottom",
+      legend.title = element_blank(), 
+      legend.margin=margin(0,0,0,0),
+      legend.box.margin=margin(t = -10)
+    )
+p
+plot_title <- "acc_curve_all_basins_genera_species_bar.pdf"
+ggsave(paste(plot_path, plot_title, sep = "/"), p, width = 15, height = 10)
