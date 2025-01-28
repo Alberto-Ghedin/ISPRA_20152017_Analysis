@@ -33,7 +33,7 @@ select_and_order <- function(data, title, n_otu = 10, n_samples = 2220) {
     data$type <- title
     return(data %>% dplyr::select(Taxon, Frequency, type))
 }
-[order(data$Frequency, decreasing = FALSE)]
+
 top_taxa <- read.csv("./Taxa_freq_95.csv")
 top_species <- read.csv("./Species_freq_top.csv")
 top_genera <- read.csv("./Genera_freq_top.csv")
