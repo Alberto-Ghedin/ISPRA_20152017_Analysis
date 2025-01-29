@@ -94,3 +94,28 @@ p <- ggplot(abund, aes(x = Region, y = Num_cell_l, fill = Region)) +
         title = "Sample abundance per basin and season"
     ) 
 ggsave(file.path(HOME_, "abundance_per_basin_season.pdf"), p, width = 25, height = 15, dpi = 300)
+
+abund_groups <- phyto_abund %>% mutate(
+    higher_group = case_when(
+        Class == "Dinoflagellata incertae sedis" ~ "Dinoflagellata",
+        Taxon == "Noctilucea" ~ "Dinoflagellata",
+        Class == "nan" ~ Taxon, 
+        Class == "Dinophyceae" ~ "Dinoflagellata", 
+        TRUE ~ Class
+    )
+) %>% group_by(Date, id, higher_group) %>%
+summarise(
+    Abund = sum(Num_cell_l),
+    Region = first(Region),
+    Season = first(Season), 
+    Basin = first(Basin), 
+    .groups = "drop"
+)
+
+top_classes
+abund_groups %>% dplyr::filter(higher_group %in% c(top_classes$Class[c(1:4)],"Pyramimonadophyceae", "Dinoflagellata")) %>% 
+ggplot() + 
+geom_boxplot(aes(x = higher_group, y = log10(Abund))) + 
+facet_grid(Basin ~ Season, scale = "free")
+
+abund_groups %>% head()
