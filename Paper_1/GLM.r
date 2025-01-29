@@ -42,8 +42,58 @@ chem_phys %>% dplyr::select(-c(Secchi_depth, id, Date, E_cond)) %>% pivot_longer
 ggplot() +
 geom_boxplot(aes(x = Region, y = value))  + facet_wrap(~ var, scale = "free_y") + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x = "Variable", y = "Value")
 
-data_fit <-merge(chem_phys %>% dplyr::select(-c(Secchi_depth, E_cond, Region)) %>% na.omit(), sample_abund, how = "inner", by = c("Date", "id")) %>% dplyr::filter(TN / TP < 120)
+data_fit <-merge(
+    chem_phys %>% dplyr::select(c(-Region, -Secchi_depth, -E_cond, -O_sat)), 
+    sample_abund, how = "inner", by = c("Date", "id")
+    ) %>% dplyr::select(-c(Date, id)) %>% 
+    dplyr::filter(pH > 7, PO4 < 2)
 
+
+data_fit %>% dplyr::filter(Basin == "NorthAdr") %>% pivot_longer(cols = -c(Region, Season, Basin, sample_abund), names_to = "var", values_to = "value")  %>% na.omit() %>% 
+ggplot() + 
+geom_point(aes(x = log10(value+1), y = log10(sample_abund), color = Region)) + facet_wrap(~ var, scales = "free") + theme_minimal() + labs(x = "Value", y = "Sample abundance")
+data_fit %>% dplyr::filter(Basin == "SouthAdr") %>% pivot_longer(cols = -c(Region, Season, Basin, sample_abund), names_to = "var", values_to = "value")  %>% na.omit() %>% 
+ggplot() + 
+geom_point(aes(x = log10(value+1), y = log10(sample_abund), color = Region)) + facet_wrap(~ var, scales = "free") + theme_minimal() + labs(x = "Value", y = "Sample abundance")
+data_fit %>% dplyr::filter(Basin == "Ion") %>% pivot_longer(cols = -c(Region, Season, Basin, sample_abund), names_to = "var", values_to = "value")  %>% na.omit() %>% 
+ggplot() + 
+geom_point(aes(x = log10(value+1), y = log10(sample_abund), color = Region)) + facet_wrap(~ var, scales = "free") + theme_minimal() + labs(x = "Value", y = "Sample abundance")
+data_fit %>% dplyr::filter(Basin == "SouthTyr") %>% pivot_longer(cols = -c(Region, Season, Basin, sample_abund), names_to = "var", values_to = "value")  %>% na.omit() %>% 
+ggplot() + 
+geom_point(aes(x = log10(value+1), y = log10(sample_abund), color = Region)) + facet_wrap(~ var, scales = "free") + theme_minimal() + labs(x = "Value", y = "Sample abundance")
+data_fit %>% dplyr::filter(Basin == "NorthTyr") %>% pivot_longer(cols = -c(Region, Season, Basin, sample_abund), names_to = "var", values_to = "value")  %>% na.omit() %>% 
+ggplot() + 
+geom_point(aes(x = log10(value+1), y = log10(sample_abund), color = Region)) + facet_wrap(~ var, scales = "free") + theme_minimal() + labs(x = "Value", y = "Sample abundance")
+
+
+data_fit %>% mutate(N_P = TN / TP) %>% dplyr::filter(N_P < 120) %>% dplyr::filter(!Region %in% c("EMR", "FVG", "VEN")) %>% ggplot() + 
+geom_point(aes(y = log10(sample_abund), x = N_P, color = Region)) + theme_minimal() 
+data_fit %>% mutate(N_P = TN / TP) %>% dplyr::filter(N_P < 120) %>% dplyr::filter(Region %in% c("EMR", "FVG", "VEN")) %>% ggplot() + 
+geom_point(aes(y = log10(sample_abund), x = N_P, color = Region)) + theme_minimal()#+ labs(x = "TN", y = "TP")
+data_fit %>% dim()
+data_fit <-merge(chem_phys %>% dplyr::select(c(Date, id, -Region, Chla, Salinity, TP, TN)) %>% na.omit(), sample_abund, how = "inner", by = c("Date", "id")) #%>% dplyr::filter(TN / TP < 120)
+
+## Testing lmer4 ##
+model_lmer <- lme4::glmer(sample_abund ~Salinity + (1 | Region) + (1| Season), data = data_fit, family = negative.binomial(theta = 1))
+summary(model_lmer)
+make_prediction_df <- function(data, model) {
+    predicted <- data.frame(
+        Region = data$Region,
+        Season = data$Season,
+        predicted = predict(model, newdata = data, type = "response"), 
+        residuals = residuals(model, type = "pearson")
+    )
+    return(predicted)
+}
+predicted <- make_prediction_df(data_fit, model_lmer)
+predicted %>% ggplot() + 
+geom_point(aes(x = log10(predicted+1), y = log10(residuals+1), fill = Region), colour = "black", pch = 21, size = 3, alpha = 0.8)
+predicted %>% ggplot() + 
+geom_boxplot(aes(x = Region, y = log10(residuals+1), group = Region))
+model_val(model_lmer)
+plot(model_lmer)
+
+drop1(model_lmer)
 #NB model ##
 model_nb <-  MASS::glm.nb(sample_abund ~ Region + Season, data = sample_abund[-c(1554, 966, 1348),])
 model_mixed_nb <- MASS::glmmPQL(sample_abund ~ Region, random = ~ 1 | Season, data = sample_abund, family = negative.binomial(theta = 1))
