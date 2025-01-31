@@ -9,6 +9,7 @@ library(parallel)
 library(indicspecies)
 library(readxl)
 library(patchwork)
+library(ggplot2)
 
 HOME_ <- "."
 
@@ -172,86 +173,42 @@ write.xlsx(list_df, paste(HOME_, "indval_only_genera_single_tyr.xlsx", sep = "/"
 IndVal <- read_excel("./indval_per_basin.xlsx", sheet = "Indval", col_names = TRUE) 
 colnames(IndVal)[1] <- "Taxon"
 IndVal <- IndVal %>% dplyr::filter(Taxon != "Other phytoplankton")
-
-
-
-
-maps <- vector("list", 2)
-taxa_list <- order_species(IndVal, ordered_basins, threshold = 0)
-complete_indval <- IndVal %>% column_to_rownames(var = "Taxon") %>% .[taxa_list, ordered_basins] %>% as.matrix()
-max_indval <- max(complete_indval)
-col_fun = colorRamp2(c(0, max_indval / 2, max_indval), c("darkgreen", "white", "brown4"))
-maps[[1]] <- grid.grabExpr(
-    draw(
-        Heatmap(complete_indval, 
-        col = col_fun,
-        cluster_rows = FALSE,
-        cluster_columns = FALSE,
-        row_names_centered = FALSE,
-        show_column_names = TRUE,
-        show_row_names = FALSE,
-        column_names_rot = 45, 
-        row_title = "Taxon",
-        row_title_gp = gpar(fontsize = 20),
-        column_names_gp = gpar(fontsize = 20),
-        row_title_rot = 90,
-        show_heatmap_legend = FALSE
+taxa_list <- order_species(IndVal, ordered_basins, threshold = 0.5)
+partial_indval <- IndVal[, c("Taxon", ordered_basins)] %>% dplyr::filter(Taxon %in% taxa_list) %>% 
+pivot_longer(cols = all_of(ordered_basins), names_to = "Basin", values_to = "IndVal") 
+partial_indval$Taxon <- factor(partial_indval$Taxon, levels = taxa_list)
+partial_indval$Basin <- factor(partial_indval$Basin, levels = ordered_basins)
+p2 <- partial_indval %>% ggplot(aes(x = Basin, y = Taxon, fill = IndVal)) +
+geom_tile() + 
+geom_text(aes(label = round(IndVal, 2), colour = ifelse(IndVal > 0.5, "black", "white")), size = 6) +
+theme_bw() +
+theme(
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 22),
+    axis.text.y = element_text(size = 22, face = "italic"),
+    axis.title.y = element_blank(),
+    axis.title.x = element_text(size = 25),
+    strip.text = element_text(size = 20),
+    plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
+    legend.position = "bottom", 
+    #axis.text.y = element_blank(), axis.ticks.y = element_blank()
+    ) + 
+scale_y_discrete(limits = rev) + 
+scale_fill_continuous(type = "viridis", limits = c(0, 1)) + 
+scale_colour_manual(values=c("white"="white", "black"="black")) +
+guides(colour = "none") + guides(
+    fill = guide_colourbar(
+        title = "IndVal", 
+        title.position = "left", 
+        title.theme = element_text(size = 25, face = "bold", margin = margin(r = 30), vjust = 1), 
+        label.theme = element_text(size = 20),
+        barwidth = unit(20, "lines"),
+        ticks.linewidth = 1,
+        frame.linewidth = 1,
+        ticks.colour = "black",
+        frame.colour  ='black'
         )
     )
-)
-taxa_list <- order_species(IndVal, ordered_basins, threshold = 0.5)
-partial_indval <- IndVal %>% column_to_rownames(var = "Taxon") %>% .[taxa_list, ordered_basins] %>% as.matrix()
-maps[[2]] <- grid.grabExpr(
-    draw(
-        Heatmap(partial_indval, 
-        col = col_fun,
-        cluster_rows = FALSE,
-        cluster_columns = FALSE,
-        row_names_centered = FALSE,
-        show_column_names = TRUE,
-        show_row_names = TRUE,
-        column_names_rot = 45, 
-        row_names_gp = gpar(fontsize = 20, fontface = "italic"),
-        column_names_gp = gpar(fontsize = 20),
-        row_title_rot = 90,
-        row_names_side = "left",
-        heatmap_legend_param = list(
-            title = "IndVal", 
-            #at = seq(0, max(partial_indval), 0.2), 
-            legend_width = unit(0.5, "inch"), 
-            legend_height = unit(4, "inch"), 
-            title_position = "topcenter",
-            title_gp = gpar(fontsize = 25, fontface = "bold", lheight = 5),
-            labels_gp = gpar(fontsize = 20), 
-            grid_width = unit(0.5, "inch")
-            ),
-        width = unit(8, "inch"),
-        cell_fun = function(j, i, x, y, width, height, fill) {
-            grid.text(sprintf("%.2f", partial_indval[i, j]), x, y, gp = gpar(fontsize = 18))
-        }
-        ), 
-        padding = unit(c(0.2, -2, 0.2, -7), "cm")
-    )
-)
-
-
-combined_plot <- grid.arrange(grobs = maps, ncol=2, clip=FALSE, widths = c(1, 2)) 
-text_grob_a <- grid::textGrob(label = "(a)",
-          x=0.01, 
-          y=0.98,
-          gp=gpar(fontsize=20, col="black"))
-text_grob_b <- grid::textGrob(label = "(b)",
-            x=0.425, 
-            y=0.98,
-            gp=gpar(fontsize=20, col="black"))
-grid.newpage()
-grid.draw(combined_plot)
-grid.draw(text_grob_a)
-grid.draw(text_grob_b)
-ggsave(file.path(HOME_, "IndVal_per_basin.pdf"), plot = grid.grab(), width = 22, height = 13, dpi = 600)
-
-
-
+p2
 
 IndVal <- read_excel("./indval_only_genera.xlsx", sheet = "Indval", col_names = TRUE) 
 colnames(IndVal)[1] <- "Taxon"
@@ -317,7 +274,17 @@ guides(colour = "none") + guides(
     )
 
 
-p1 + p2 + plot_layout(guides = "collect") & theme(legend.position = "bottom", legend.box.margin = margin(r = 40))
+p1 + p2 + 
+plot_annotation(
+    title = "Indicator value for genera across basins", 
+    tag_levels = "A"
+    ) + 
+plot_layout(guides = "collect") & 
+theme(
+    legend.position = "bottom", 
+    legend.box.margin = margin(r = 40), 
+    plot.title = element_text(size = 25, hjust = 0.5, face = "bold")
+    )
 
 
 IndVal <- read_excel("./indval_only_genera_single_tyr.xlsx", sheet = "Indval", col_names = TRUE) 

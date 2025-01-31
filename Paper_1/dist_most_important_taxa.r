@@ -7,6 +7,7 @@ library(reshape2)
 library(grid)
 library(tidyverse)
 library(paletteer)
+library(viridis)
 
 order_species <- function(df, basins, threshold = 0.5) {
     characteristic_species <- df$Taxon[apply(df[, basins], 1, function(x) any(x >= threshold))]
@@ -34,72 +35,33 @@ data_plot <- phyto_abund %>% dplyr::select(c(Basin, Date, id, Season, Genus, Num
 dplyr::filter(Genus %in% IndVal_taxon) %>% group_by(Basin, Season, Genus) %>% summarise(Abund = sum(Num_cell_l), n_sample_basin = first(n_sample_basin), .groups = "drop") %>% 
 mutate(Abund = Abund / n_sample_basin) %>% complete(Basin, Season, Genus, fill = list(Abund = 0))
 data_plot <- phyto_abund %>% dplyr::select(c(Basin, Date, id, Season, Genus, Num_cell_l)) %>% group_by(Basin, Season) %>% mutate(n_sample_basin = n_distinct(id, Date)) %>%
-dplyr::filter(Genus %in% IndVal_taxon) %>% group_by(Basin, Season, Genus) %>% summarise(Abund = median(Num_cell_l), n_sample_basin = first(n_sample_basin), .groups = "drop") %>% 
+dplyr::filter(Genus %in% IndVal_taxon) %>% group_by(Basin, Season, Genus) %>% summarise(Abund = mean(Num_cell_l), n_sample_basin = first(n_sample_basin), .groups = "drop") %>% 
 complete(Basin, Season, Genus, fill = list(Abund = 0))
 data_plot$Genus <- factor(data_plot$Genus, level = IndVal_taxon)
 data_plot$Season <- factor(data_plot$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
 data_plot$Basin <- factor(data_plot$Basin, levels = ordered_basins)
-colors <- paletteer::paletteer_d("ggsci::category20_d3")
-custom_palette <- setNames(
-    as.character(colors[1:length(unique(data_plot$Genus))]), 
-    unique(data_plot$Genus)
-    )
 
-
-
-data_plot %>% mutate(Abund = log10(Abund +1)) %>% 
-ggplot(aes(x = Season, y = Basin, fill = Abund)) +
-facet_wrap(~Genus) +
-geom_tile() + 
-geom_text(aes(label = round(Abund, 2), colour = ifelse(Abund > 3, "black", "white")), size = 6) +
-theme_bw() +
-scale_fill_continuous(type = "viridis") + 
-scale_colour_manual(values=c("white"="white", "black"="black")) +
-scale_y_discrete(limits = rev) + 
-theme(
-        axis.text.x = element_text(angle = 0, hjust = 0.5, size = 22),
-        axis.text.y = element_text(size = 22),
-        axis.title.y = element_text(size = 25),
-        axis.title.x = element_text(size = 25),
-        strip.text = element_text(size = 20),
-        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
-        legend.text = element_text(size = 10),
-        legend.title = element_text(size = 25, face = "bold"),
-        legend.position = "bottom", 
-        #strip.text.x = element_text(size = 16), 
-        #strip.text.y = element_text(size = 16), 
-        #panel.spacing = unit(1, "lines")
-    ) + 
-    guides(
-        color = "none", 
-        fill = guide_colourbar(
-            title = "IndVal", 
-            title.position = "left", 
-            title.theme = element_text(size = 25, face = "bold", margin = margin(r = 30), vjust = 1), 
-            label.theme = element_text(size = 20),
-            barwidth = unit(20, "lines"),
-            ticks.linewidth = 1,
-            frame.linewidth = 1,
-            ticks.colour = "black",
-            frame.colour  ='black'
-            )
-    )
-
-data_plot %>% mutate(Abund = log10(Abund +1)) %>% 
-ggplot(aes(x = Season, y = Genus, fill = Abund)) +
+sciencific_notation <- function(x) {
+    y <- gsub("\\+0", "", scales::scientific(x, digits = 2))
+    y <- gsub("0\\.0e0", "0", y)
+}
+p <- data_plot %>%
+ggplot(aes(x = Season, y = Genus, fill = Abund + 1)) +
 facet_wrap(~Basin, nrow = 1) +
 geom_tile() + 
-geom_text(aes(label = round(Abund, 2), colour = ifelse(Abund > 3, "black", "white")), size = 6) +
+ geom_text(aes(label = sciencific_notation(Abund), colour = ifelse(Abund > 1e3, "black", "white")), size = 4.5) + 
+#geom_text(aes(label = round(Abund, 2), colour = ifelse(Abund > 3, "black", "white")), size = 5) +
 theme_bw() +
-scale_fill_continuous(type = "viridis") + 
+scale_fill_viridis(option = "viridis", name = "Value", trans = "log10") +
 scale_y_discrete(limits = rev) + 
 scale_colour_manual(values=c("white"="white", "black"="black")) +
+labs(title = "Distribution of the abundances of the characteristic genera") +
 theme(
-        axis.text.x = element_text(angle = 0, hjust = 0.5, size = 22),
-        axis.text.y = element_text(size = 22),
+        axis.text.x = element_text(hjust = 1, size = 22, angle = 45, vjust = 1),
+        axis.text.y = element_text(size = 22, face = "italic"),
         axis.title.y = element_text(size = 25),
         axis.title.x = element_text(size = 25),
-        strip.text = element_text(size = 20),
+        strip.text = element_text(size = 20, face = "bold"),
         plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
         legend.text = element_text(size = 10),
         legend.title = element_text(size = 25, face = "bold"),
@@ -122,7 +84,9 @@ theme(
             frame.colour  ='black'
             )
     )
+p
 
+ggsave(file.path(HOME_, "dist_indval_genera.svg"), p, width = 17, height = 10, dpi = 300)
 
 ## TESTS ##
 mean_abund_per_season_basin <- phyto_abund %>% mutate(

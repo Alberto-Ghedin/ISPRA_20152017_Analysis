@@ -72,14 +72,14 @@ p <- ggplot(abund, aes(x = Region, y = Num_cell_l, fill = Region)) +
     geom_boxplot(width = 0.5, position = position_dodge("preserve")) +
     #scale_y_log10(labels = scales::scientific) +
     scale_fill_manual(values = palette) +
-    facet_grid(Season ~ Basin, scales = "free_x", space = "free_x") +
+    facet_wrap(~Basin, scales = "free_x", ncol = 2) +
     theme_bw() +
     theme(
         axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
         axis.text.y = element_text(size = 20),
         axis.title.y = element_text(size = 22),
         axis.title.x = element_text(size = 22),
-        strip.text = element_text(size = 20),
+        strip.text = element_text(size = 23),
         plot.title = element_text(size = 25, hjust = 0.5),
         legend.text = element_text(size = 15),
         legend.title = element_text(size = 18),
@@ -92,15 +92,16 @@ p <- ggplot(abund, aes(x = Region, y = Num_cell_l, fill = Region)) +
                 labels = trans_format("log10", math_format(10^.x))) + 
     labs(
         y = "Abundance [cells/L]",
-        title = "Sample abundance per basin and season"
+        title = "Sample abundance in each region"
     ) 
-ggsave(file.path(HOME_, "abundance_per_basin_season.pdf"), p, width = 25, height = 15, dpi = 300)
+p
+ggsave(file.path(HOME_, "abundance_per_basin.pdf"), p, width = 12, height = 16, dpi = 300)
 
 abund_groups <- phyto_abund %>% mutate(
     higher_group = case_when(
         Class == "Dinoflagellata incertae sedis" ~ "Dinoflagellata",
         Taxon == "Noctilucea" ~ "Dinoflagellata",
-        Class == "nan" ~ Taxon, 
+        Class == "nan" ~ "Unknown", 
         Class == "Dinophyceae" ~ "Dinoflagellata", 
         TRUE ~ Class
     )
@@ -147,6 +148,7 @@ theme_bw() +
         strip.text.y = element_text(size = 15, face = "bold"), 
         panel.spacing = unit(1, "lines")
     ) +
+    #ylim(100, 1e6) + 
     scale_y_continuous(trans="log10", breaks = trans_breaks("log10", function(x) 10^x, breaks = breaks_extended(4)),
                 labels = trans_format("log10", math_format(10^.x))) + 
     labs(
@@ -155,19 +157,41 @@ theme_bw() +
         title = "Sample abundance per basin and season"
     )
 
-abund_groups %>% dplyr::filter(higher_group %in% c(top_classes$Class[c(1:4)],"Pyramimonadophyceae", "Dinoflagellata")) %>% 
+bloom <- data.frame(
+    Basin = rep(ordered_basins, each = 4),
+    Season = rep(c("Winter", "Spring", "Summer", "Autumn"), times = 6),
+    Num_cell_l = rep(c(1e4), 24), 
+    Region = rep("BAS", times = 24), 
+    label = rep("", times = 24)
+)
+bloom[which(bloom$Season == "Winter" & bloom$Basin == "NorthAdr"), "label"] <- "Bloom"
+bloom$Region <- factor(bloom$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
+bloom$Season <- factor(bloom$Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)
+group_plot_data <- abund_groups %>% 
 mutate(
     Abbr = case_when(
-        higher_group == "Pyramimonadophyceae" ~ "PYR",
+        #higher_group == "Pyramimonadophyceae" ~ "PYR",
         higher_group == "Dinoflagellata" ~ "DIN",
         higher_group == "Bacillariophyceae" ~ "DIA",
         higher_group == "Coccolithophyceae" ~ "COC",
         higher_group == "Cryptophyceae" ~ "CRY",
+        higher_group != "Unknown" ~ "Else",
+        higher_group == "Unknown" ~ "UNK",
     )
-) %>% 
+) %>% group_by(Date, id, Abbr) %>%
+summarise(
+    Abund = sum(Abund),
+    Region = first(Region),
+    Season = first(Season), 
+    Basin = first(Basin), 
+    .groups = "drop"
+)
+p <- group_plot_data %>% 
+#dplyr::filter(Abbr != "Unknown") %>%
 ggplot() + 
 geom_boxplot(aes(x = Abbr, y = Abund), width = 0.5) + 
-facet_wrap(~Season) + 
+geom_hline(yintercept = 1e6, linetype = "dashed", color = "black", alpha = 0.8, linewidth = 0.9) + 
+facet_wrap(~Basin, ncol = 2) + 
 theme_bw() +
     theme(
         axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
@@ -188,5 +212,27 @@ theme_bw() +
     labs(
         y = "Abundance [cells/L]",
         x = "Phytoplankton groups",
-        title = "Sample abundance per basin and season"
+        title = "Abundance of phytoplankton groups in each basin"
     )
+p
+ggsave(file.path(HOME_, "abundance_per_group.pdf"), p, width = 12, height = 16, dpi = 300)
+
+abund_groups %>% dplyr::filter(higher_group %in% c(top_classes$Class[c(1:4)],"Pyramimonadophyceae", "Dinoflagellata")) %>% 
+mutate(
+    Abbr = case_when(
+        #higher_group == "Pyramimonadophyceae" ~ "PYR",
+        higher_group == "Dinoflagellata" ~ "DIN",
+        higher_group == "Bacillariophyceae" ~ "DIA",
+        higher_group == "Coccolithophyceae" ~ "COC",
+        higher_group == "Cryptophyceae" ~ "CRY",
+        higher_group != "Unknown" ~ "Else",
+        TRUE ~ higher_group
+    )
+) %>% group_by(Date, id, Abbr) %>%
+summarise(
+    Abund = sum(Abund),
+    Region = first(Region),
+    Season = first(Season), 
+    Basin = first(Basin), 
+    .groups = "drop"
+) %>% head()
