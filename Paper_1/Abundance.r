@@ -2,6 +2,7 @@ library(ggplot2)
 library(dplyr)
 library(tidyr)
 library(scales)
+
 HOME_ <- "."
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
 
@@ -111,11 +112,81 @@ summarise(
     Basin = first(Basin), 
     .groups = "drop"
 )
+abund_groups$Region <- factor(abund_groups$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
+abund_groups$Basin <- factor(abund_groups$Basin, levels = ordered_basins, ordered = TRUE)
+abund_groups$Season <- factor(abund_groups$Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)
 
-top_classes
+top_classes <- phyto_abund %>% group_by(Class) %>% summarise(Frequency = n_distinct(Date, id)) %>% arrange(desc(Frequency)) %>% dplyr::filter(Class != "nan")
+
+c(top_classes$Class[c(1:4)],"Pyramimonadophyceae", "Dinoflagellata")
 abund_groups %>% dplyr::filter(higher_group %in% c(top_classes$Class[c(1:4)],"Pyramimonadophyceae", "Dinoflagellata")) %>% 
+mutate(
+    Abbr = case_when(
+        higher_group == "Pyramimonadophyceae" ~ "PYR",
+        higher_group == "Dinoflagellata" ~ "DIN",
+        higher_group == "Bacillariophyceae" ~ "DIA",
+        higher_group == "Coccolithophyceae" ~ "COC",
+        higher_group == "Cryptophyceae" ~ "CRY",
+    )
+) %>% 
 ggplot() + 
-geom_boxplot(aes(x = higher_group, y = log10(Abund))) + 
-facet_grid(Basin ~ Season, scale = "free")
+geom_boxplot(aes(x = Abbr, y = Abund), width = 0.5) + 
+facet_grid(Basin ~ Season) + 
+theme_bw() +
+    theme(
+        axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
+        axis.text.y = element_text(size = 20),
+        axis.title.y = element_text(size = 22),
+        axis.title.x = element_text(size = 22),
+        strip.text = element_text(size = 20),
+        plot.title = element_text(size = 25, hjust = 0.5),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 18),
+        legend.position = "none", 
+        strip.text.x = element_text(size = 15, face = "bold"), 
+        strip.text.y = element_text(size = 15, face = "bold"), 
+        panel.spacing = unit(1, "lines")
+    ) +
+    scale_y_continuous(trans="log10", breaks = trans_breaks("log10", function(x) 10^x, breaks = breaks_extended(4)),
+                labels = trans_format("log10", math_format(10^.x))) + 
+    labs(
+        y = "Abundance [cells/L]",
+        x = "Phytoplankton groups",
+        title = "Sample abundance per basin and season"
+    )
 
-abund_groups %>% head()
+abund_groups %>% dplyr::filter(higher_group %in% c(top_classes$Class[c(1:4)],"Pyramimonadophyceae", "Dinoflagellata")) %>% 
+mutate(
+    Abbr = case_when(
+        higher_group == "Pyramimonadophyceae" ~ "PYR",
+        higher_group == "Dinoflagellata" ~ "DIN",
+        higher_group == "Bacillariophyceae" ~ "DIA",
+        higher_group == "Coccolithophyceae" ~ "COC",
+        higher_group == "Cryptophyceae" ~ "CRY",
+    )
+) %>% 
+ggplot() + 
+geom_boxplot(aes(x = Abbr, y = Abund), width = 0.5) + 
+facet_wrap(~Season) + 
+theme_bw() +
+    theme(
+        axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
+        axis.text.y = element_text(size = 20),
+        axis.title.y = element_text(size = 22),
+        axis.title.x = element_text(size = 22),
+        strip.text = element_text(size = 20),
+        plot.title = element_text(size = 25, hjust = 0.5),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 18),
+        legend.position = "none", 
+        strip.text.x = element_text(size = 15, face = "bold"), 
+        strip.text.y = element_text(size = 15, face = "bold"), 
+        panel.spacing = unit(1, "lines")
+    ) +
+    scale_y_continuous(trans="log10", breaks = trans_breaks("log10", function(x) 10^x, breaks = breaks_extended(4)),
+                labels = trans_format("log10", math_format(10^.x))) + 
+    labs(
+        y = "Abundance [cells/L]",
+        x = "Phytoplankton groups",
+        title = "Sample abundance per basin and season"
+    )
