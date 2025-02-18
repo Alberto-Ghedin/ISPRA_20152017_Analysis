@@ -2,6 +2,7 @@ library(dplyr)
 library(tidyr)
 library(tidytext)
 library(ggplot2)
+library(grid)
 
 HOME_ <- "."
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
@@ -46,31 +47,31 @@ top_species <- phyto_abund %>% dplyr::filter(Det_level == "Species") %>% group_b
 
 
 data <- list(
-    select_and_order(top_taxa, "Most common taxa", n_otu = 10, n_samples = 2220),
-    select_and_order(top_classes, "Most common Classes", n_otu = 10, n_samples = 2220),
-    select_and_order(top_genera, "Most common Genera", n_otu = 10, n_samples = 2220),
-    select_and_order(top_species, "Most common Species", n_otu = 10, n_samples = 2220)
+    select_and_order(top_taxa, "Most common taxa", n_otu = 5, n_samples = 2220),
+    select_and_order(top_classes, "Most common Classes", n_otu = 5, n_samples = 2220),
+    select_and_order(top_genera, "Most common Genera", n_otu = 5, n_samples = 2220),
+    select_and_order(top_species, "Most common Species", n_otu = 5, n_samples = 2220)
 ) %>% bind_rows()
 data$type <- factor(data$type, levels = c("Most common taxa", "Most common Classes", "Most common Genera", "Most common Species"))
 data <- data %>% arrange(type, desc(Frequency))
-data %>%  mutate(Taxon = reorder_within(Taxon, Frequency, within = type))
 
 plot_most_common <- function(data) {    
     p <- ggplot(data, aes(x = Frequency, y = Taxon)) +
-        geom_point(size = 5) +
+        geom_point(size = 10) +
         labs(x = "Frequency of occurrence", y = "") +
         theme(
-            axis.text.x = element_text(size = 20, color = "black"),
-            axis.text.y = element_text(size = 20, face = "italic", color = "black"),
-            axis.title.x = element_text(size = 20), 
-            axis.title.y = element_text(size = 20),
-            strip.text = element_text(size=22, face = "bold"),
+            axis.text.x = element_text(size = 25, color = "black"),
+            axis.text.y = element_text(size = 25, face = "italic", color = "black"),
+            axis.title.x = element_text(size = 25), 
+            axis.title.y = element_text(size = 25),
+            strip.text = element_text(size=27, face = "bold"),
             panel.border = element_rect(colour = "black", fill=NA, linewidth=1), 
             strip.background = element_rect(color = "black", linewidth = 1)
         ) +
         scale_x_continuous(labels = scales::percent) + 
         tidytext::scale_y_reordered() +
-        facet_wrap(~type, ncol = 2, scales = "free", labeller = label_wrap_gen(multi_line = FALSE))
+        facet_wrap(~type, ncol = 2, scales = "free", labeller = label_wrap_gen(multi_line = FALSE)) + 
+        theme(plot.margin = margin(0.2, 1, 0.2, -1, "cm"))
     
     return(p)
 }
@@ -94,6 +95,15 @@ grid::grid.text(label = "(d)",
           y=0.50,
           gp=gpar(fontsize=22, col="black"))
 dev.off()
+svg(file.path(HOME_, "most_common_taxa_classes_genera_species.svg"), width = 32, height = 17)
+plot_most_common(data %>%  mutate(Taxon = reorder_within(Taxon, Frequency, within = type)))
+ggsave(
+    plot_most_common(data %>%  mutate(Taxon = reorder_within(Taxon, Frequency, within = type))), 
+    file = file.path(HOME_, "most_common_taxa_classes_genera_species.svg"),
+    width = 24, height = 10, dpi = 300
+)
+
+dev.off()
 
 rich_classes <- phyto_abund %>%
     filter(Taxon != "Other phytoplankton" & Det_level == "Species") %>%
@@ -114,8 +124,8 @@ select_and_order <- function(data, title, n_otu = 10) {
 }
 
 data <- list(
-    select_and_order(rich_classes, "Top species-rich classes", n_otu = 10), 
-    select_and_order(rich_genera, "Top species-rich genera", n_otu = 10)
+    select_and_order(rich_classes, "Top species-rich classes", n_otu = 5), 
+    select_and_order(rich_genera, "Top species-rich genera", n_otu = 5)
 ) %>% bind_rows()
 data <- data %>%  mutate(Taxon = reorder_within(Taxon, n_distinct, within = type))
 
@@ -124,11 +134,11 @@ plot_most_common <- function(data) {
         geom_point(size = 5) +
         labs(x = "Number of species", y = "") +
         theme(
-            axis.text.x = element_text(size = 15, color = "black"),
-            axis.text.y = element_text(size = 15, face = "italic", color = "black"),
-            axis.title.x = element_text(size = 15), 
-            axis.title.y = element_text(size = 15),
-            strip.text = element_text(size=18, face = "bold"),
+            axis.text.x = element_text(size = 25, color = "black"),
+            axis.text.y = element_text(size = 25, face = "italic", color = "black"),
+            axis.title.x = element_text(size = 25), 
+            axis.title.y = element_text(size = 25),
+            strip.text = element_text(size=27, face = "bold"),
             panel.border = element_rect(colour = "black", fill=NA, linewidth=1), 
             strip.background = element_rect(color = "black", linewidth = 1)
         ) +
@@ -150,6 +160,11 @@ grid::grid.text(label = "(b)",
           y=0.98,
           gp=gpar(fontsize=20, col="black"))
 dev.off()
+ggsave(
+    plot_most_common(data %>%  mutate(Taxon = reorder_within(Taxon, n_distinct, within = type))), 
+    file = file.path(HOME_, "top_species_rich_classes_genera.svg"),
+    width = 16, height = 6, dpi = 300
+)
 
 cat_contribution <- phyto_abund %>% 
     group_by(Region, Date, id, Det_level) %>% 
@@ -171,7 +186,7 @@ p <- ggplot(cat_contribution, aes(x = Region, y = rel_cont, fill = Det_level)) +
     geom_bar(stat = "identity", color = "black", linewidth = 1) +
     labs(x = "Region", y = "Proportion of abundance", fill = "Identification \n level") +
     theme_minimal() +
-    ggtitle("Average contribuion of each identification level to the sample abundance in each region") +
+    ggtitle("Average contribuion of each identification level to \n the sample abundance in each region") +
     #scale_fill_manual()
     theme_bw() +
     theme(
@@ -183,9 +198,10 @@ p <- ggplot(cat_contribution, aes(x = Region, y = rel_cont, fill = Det_level)) +
         plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
         legend.text = element_text(size = 25),
         legend.title = element_text(size = 25, face = "bold"),
-        #legend.position = "none", 
+        legend.position = "bottom", 
         #strip.text.x = element_text(size = 16), 
         #strip.text.y = element_text(size = 16), 
         #panel.spacing = unit(1, "lines")
     ) 
+p
 ggsave(file.path(HOME_, "relative_abundance_per_region.pdf"), p, width = 22, height = 13, dpi = 300)
