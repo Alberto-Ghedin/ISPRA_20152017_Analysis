@@ -231,7 +231,7 @@ p1 <- complete_indval %>% ggplot(aes(x = Basin, y = Taxon, fill = IndVal)) +
 geom_tile() + 
 theme_bw() +
 theme(
-    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 22),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
     axis.title.y = element_text(size = 25),
     axis.title.x = element_text(size = 25),
     strip.text = element_text(size = 20),
@@ -247,8 +247,8 @@ geom_tile() +
 geom_text(aes(label = round(IndVal, 2), colour = ifelse(IndVal > 0.5, "black", "white")), size = 6) +
 theme_bw() +
 theme(
-    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 22),
-    axis.text.y = element_text(size = 22, face = "italic"),
+    axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
+    axis.text.y = element_text(size = 20, face = "italic"),
     axis.title.y = element_blank(),
     axis.title.x = element_text(size = 25),
     strip.text = element_text(size = 20),
@@ -274,7 +274,7 @@ guides(colour = "none") + guides(
     )
 
 
-p1 + p2 + 
+p <- p1 + p2 + 
 plot_annotation(
     title = "Indicator value for genera across basins", 
     tag_levels = "A"
@@ -285,7 +285,11 @@ theme(
     legend.box.margin = margin(r = 40), 
     plot.title = element_text(size = 25, hjust = 0.5, face = "bold")
     )
-
+ggsave(
+    p, 
+    file = file.path(HOME_, "indval_per_basin.pdf"),
+    width = 18, height = 12, dpi = 300
+)
 
 IndVal <- read_excel("./indval_only_genera_single_tyr.xlsx", sheet = "Indval", col_names = TRUE) 
 colnames(IndVal)[1] <- "Taxon"
