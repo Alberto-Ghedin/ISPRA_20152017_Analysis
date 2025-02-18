@@ -27,16 +27,26 @@ colnames(IndVal)[1] <- "Taxon"
 ordered_basins <- c("NorthAdr", "SouthAdr", "Ion", "SouthTyr", "NorthTyr", "WestMed")
 IndVal_taxon <- order_species(IndVal, ordered_basins, threshold = 0.5)
 IndVal_taxon <- IndVal_taxon[! IndVal_taxon %in% c("Bacillariophyceae", "Dinoflagellata")]
+##select some genera 
+IndVal_taxon <- IndVal_taxon[IndVal_taxon %in% c("Chaetoceros", "Pseudo-nitzschia", "Skeletonema", "Proboscia", "Cymbomonas", "Telonema", "Pachysphaera", "Commation")]
 
 
+phyto_abund %>% dplyr::select(c(Basin, Date, id, Season, Genus, Num_cell_l)) %>% group_by(Basin, Season) %>% mutate(n_sample_basin = n_distinct(id, Date)) %>%
+dplyr::filter(Genus %in% IndVal_taxon) %>% group_by(Basin, Season, Genus) %>% summarise(Abund = mean(Num_cell_l), min = min(Num_cell_l), max = max(Num_cell_l), .groups = "drop") %>% 
+ggplot(aes(x = Season, y = Abund, group = Genus, color = Genus)) +
+geom_point() + 
+geom_line() +
+geom_ribbon(aes(ymin = min, ymax = max), alpha = 0.2) +
+facet_grid(~Basin) + 
+scale_y_log10() 
 
 ### BIODIVERSITY ###
 data_plot <- phyto_abund %>% dplyr::select(c(Basin, Date, id, Season, Genus, Num_cell_l)) %>% group_by(Basin, Season) %>% mutate(n_sample_basin = n_distinct(id, Date)) %>%
 dplyr::filter(Genus %in% IndVal_taxon) %>% group_by(Basin, Season, Genus) %>% summarise(Abund = sum(Num_cell_l), n_sample_basin = first(n_sample_basin), .groups = "drop") %>% 
 mutate(Abund = Abund / n_sample_basin) %>% complete(Basin, Season, Genus, fill = list(Abund = 0))
 data_plot <- phyto_abund %>% dplyr::select(c(Basin, Date, id, Season, Genus, Num_cell_l)) %>% group_by(Basin, Season) %>% mutate(n_sample_basin = n_distinct(id, Date)) %>%
-dplyr::filter(Genus %in% IndVal_taxon) %>% group_by(Basin, Season, Genus) %>% summarise(Abund = mean(Num_cell_l), n_sample_basin = first(n_sample_basin), .groups = "drop") %>% 
-complete(Basin, Season, Genus, fill = list(Abund = 0))
+dplyr::filter(Genus %in% IndVal_taxon) %>% group_by(Basin, Season, Genus) %>% summarise(Abund = mean(Num_cell_l), std = sd(Num_cell_l), n_sample_basin = first(n_sample_basin), .groups = "drop") %>% 
+complete(Basin, Season, Genus, fill = list(Abund = 0, std = 0))
 data_plot$Genus <- factor(data_plot$Genus, level = IndVal_taxon)
 data_plot$Season <- factor(data_plot$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
 data_plot$Basin <- factor(data_plot$Basin, levels = ordered_basins)
@@ -49,7 +59,7 @@ p <- data_plot %>%
 ggplot(aes(x = Season, y = Genus, fill = Abund + 1)) +
 facet_wrap(~Basin, nrow = 1) +
 geom_tile() + 
- geom_text(aes(label = sciencific_notation(Abund), colour = ifelse(Abund > 1e3, "black", "white")), size = 4.5) + 
+ geom_text(aes(label = sciencific_notation(Abund), colour = ifelse(Abund > 1e3, "black", "white")), size = 6) + 
 #geom_text(aes(label = round(Abund, 2), colour = ifelse(Abund > 3, "black", "white")), size = 5) +
 theme_bw() +
 scale_fill_viridis(option = "viridis", name = "Value", trans = "log10") +
@@ -73,9 +83,9 @@ theme(
     guides(
         color = "none", 
         fill = guide_colourbar(
-            title = "IndVal", 
+            title = "Mean abundance (log scale)", 
             title.position = "left", 
-            title.theme = element_text(size = 25, face = "bold", margin = margin(r = 30), vjust = 1), 
+            title.theme = element_text(size = 25, face = "bold", margin = margin(r = 1), vjust = 1), 
             label.theme = element_text(size = 20),
             barwidth = unit(20, "lines"),
             ticks.linewidth = 1,
@@ -83,10 +93,9 @@ theme(
             ticks.colour = "black",
             frame.colour  ='black'
             )
-    )
+        )
 p
-
-ggsave(file.path(HOME_, "dist_indval_genera.svg"), p, width = 17, height = 10, dpi = 300)
+ggsave(file.path(HOME_, "dist_indval_genera.svg"), p, width = 19.5, height = 8, dpi = 300)
 
 ## TESTS ##
 mean_abund_per_season_basin <- phyto_abund %>% mutate(
@@ -122,6 +131,11 @@ abund_most_important_taxa$Genus <- factor(abund_most_important_taxa$Genus, level
 ## NO ELSE ###
 abund_most_important_taxa$Season <- factor(abund_most_important_taxa$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
 abund_most_important_taxa$Basin <- factor(abund_most_important_taxa$Basin, levels = ordered_basins)
+
+abund_most_important_taxa <- phyto_abund %>% dplyr::filter(Genus %in% IndVal_taxon) %>% dplyr::select(c(Basin, Date, id, Season, Genus, Num_cell_l)) %>% 
+group_by(Basin, Season, Genus) %>% summarise(Abund = sum(Num_cell_l), .groups = "drop") %>% 
+group_by(Basin, Season) %>% mutate(rel_abund = Abund / sum(Abund)) 
+abund_most_important_taxa$Genus <- factor(abund_most_important_taxa$Genus, level = IndVal_taxon)
 
 abund_most_important_taxa %>% 
 ggplot() +
@@ -194,23 +208,25 @@ average_genera_cont$Basin <- factor(average_genera_cont$Basin, levels = ordered_
 average_genera_cont$Season <- factor(average_genera_cont$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
 
 
+data_plot$Abund %>% min()
 ### BARPLOT FOR BASIN ###   (TO CONTROL)
-data_plot %>%
-ggplot(aes(x = Season, y = Abund +1, group = Genus, fill = Genus, color = Genus)) +
+p <- data_plot %>% 
+ggplot(aes(x = Season, y = Abund + 1, group = Genus, fill = Genus, color = Genus)) +
 facet_wrap(~Basin, ncol = 2) +
 geom_bar(stat="identity", position=position_dodge(), color = "black", linewidth = 0.5) + 
-labs(y = "Propostion of abundace") + 
+labs(y = "Abundance [cells/L]", title = "Mean abundance of characteristic genera") + 
 theme_bw() +
 scale_y_log10() +
+coord_cartesian(ylim = c(10, 5e6)) +
 scale_fill_manual(values = custom_palette) + 
 theme(
         axis.text.x = element_text(angle = 0, hjust = 0.5, size = 22),
         axis.text.y = element_text(size = 22),
         axis.title.y = element_text(size = 25),
         axis.title.x = element_text(size = 25),
-        strip.text = element_text(size = 20),
+        strip.text = element_text(size = 20, face = "bold"),
         plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
-        legend.text = element_text(size = 10),
+        legend.text = element_text(size = 20),
         legend.title = element_text(size = 25, face = "bold"),
         legend.position = "bottom", 
         #strip.text.x = element_text(size = 16), 
@@ -218,7 +234,8 @@ theme(
         #panel.spacing = unit(1, "lines")
     ) + 
 guides(fill = guide_legend(ncol = 7))
-
+p
+ggsave(file.path(HOME_, "mean_abund_genus.png"), p, width = 12, height = 8, dpi = 300)
 #guides(fill = guide_legend(ncol = 7))
 
 
