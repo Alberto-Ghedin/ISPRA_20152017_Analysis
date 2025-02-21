@@ -45,12 +45,12 @@ top_classes <- phyto_abund %>% group_by(Class) %>% summarise(Frequency = n_disti
 top_genera <- phyto_abund %>% group_by(Genus) %>% summarise(Frequency = n_distinct(Date, id)) %>% arrange(desc(Frequency)) %>% dplyr::filter(Genus != "")
 top_species <- phyto_abund %>% dplyr::filter(Det_level == "Species") %>% group_by(Taxon) %>% summarise(Frequency = n_distinct(Date, id)) %>% arrange(desc(Frequency)) %>% na.omit()
 
-
+n_otu <- 10
 data <- list(
-    select_and_order(top_taxa, "Most common taxa", n_otu = 5, n_samples = 2220),
-    select_and_order(top_classes, "Most common Classes", n_otu = 5, n_samples = 2220),
-    select_and_order(top_genera, "Most common Genera", n_otu = 5, n_samples = 2220),
-    select_and_order(top_species, "Most common Species", n_otu = 5, n_samples = 2220)
+    select_and_order(top_taxa, "Most common taxa", n_otu = n_otu, n_samples = 2220),
+    select_and_order(top_classes, "Most common Classes", n_otu = n_otu, n_samples = 2220),
+    select_and_order(top_genera, "Most common Genera", n_otu = n_otu, n_samples = 2220),
+    select_and_order(top_species, "Most common Species", n_otu = n_otu, n_samples = 2220)
 ) %>% bind_rows()
 data$type <- factor(data$type, levels = c("Most common taxa", "Most common Classes", "Most common Genera", "Most common Species"))
 data <- data %>% arrange(type, desc(Frequency))
@@ -100,7 +100,7 @@ plot_most_common(data %>%  mutate(Taxon = reorder_within(Taxon, Frequency, withi
 ggsave(
     plot_most_common(data %>%  mutate(Taxon = reorder_within(Taxon, Frequency, within = type))), 
     file = file.path(HOME_, "most_common_taxa_classes_genera_species.svg"),
-    width = 24, height = 10, dpi = 300
+    width = 24, height = 12, dpi = 300
 )
 
 dev.off()
@@ -124,8 +124,8 @@ select_and_order <- function(data, title, n_otu = 10) {
 }
 
 data <- list(
-    select_and_order(rich_classes, "Top species-rich classes", n_otu = 5), 
-    select_and_order(rich_genera, "Top species-rich genera", n_otu = 5)
+    select_and_order(rich_classes, "Top species-rich classes", n_otu = n_otu), 
+    select_and_order(rich_genera, "Top species-rich genera", n_otu = n_otu)
 ) %>% bind_rows()
 data <- data %>%  mutate(Taxon = reorder_within(Taxon, n_distinct, within = type))
 
@@ -163,7 +163,7 @@ dev.off()
 ggsave(
     plot_most_common(data %>%  mutate(Taxon = reorder_within(Taxon, n_distinct, within = type))), 
     file = file.path(HOME_, "top_species_rich_classes_genera.svg"),
-    width = 16, height = 6, dpi = 300
+    width = 17, height = 6, dpi = 300
 )
 
 cat_contribution <- phyto_abund %>% 
@@ -205,3 +205,5 @@ p <- ggplot(cat_contribution, aes(x = Region, y = rel_cont, fill = Det_level)) +
     ) 
 p
 ggsave(file.path(HOME_, "relative_abundance_per_region.pdf"), p, width = 22, height = 13, dpi = 300)
+
+
