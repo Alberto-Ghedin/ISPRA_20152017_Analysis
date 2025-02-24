@@ -93,6 +93,17 @@ filter(Det_level == "Genus" | Det_level == "Species") %>%
 group_by(Region, Date, id, Genus) %>% summarise(Abund = sum(Num_cell_l)) %>% 
 pivot_wider( names_from = Genus, values_from = Abund, values_fill = 0) %>% ungroup()
 
+common_species <- phyto_abund %>% filter(Det_level == "Species") %>% group_by(Taxon) %>% 
+summarise(Frequency = n_distinct(Date, id) / 2220) %>% arrange(desc(Frequency)) %>% filter(Frequency > 0.1) %>% pull(Taxon) 
+common_species_observation <- phyto_abund %>% filter(Taxon %in% common_species) %>% 
+group_by(Region, Date, id, Taxon) %>% summarise(Abund = sum(Num_cell_l), .groups = "drop") %>%
+pivot_wider( names_from = Taxon, values_from = Abund, values_fill = 0) 
+
+common_genera <- phyto_abund %>% filter(Det_level == "Genus" | Det_level == "Species") %>% group_by(Genus) %>%
+summarise(Frequency = n_distinct(Date, id) / 2220) %>% arrange(desc(Frequency)) %>% filter(Frequency > 0.1) %>% pull(Genus)
+common_genera_observation <- phyto_abund %>% filter(Genus %in% common_genera) %>%
+group_by(Region, Date, id, Genus) %>% summarise(Abund = sum(Num_cell_l), .groups = "drop") %>%
+pivot_wider( names_from = Genus, values_from = Abund, values_fill = 0)
 
 incidence_freq_list <- list()
 for (region in unique(species_observation$Region)) {
@@ -108,6 +119,7 @@ endpoint <- species_observation %>% group_by(Region) %>% summarise(n_samples = n
 res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = endpoint)
 write.csv(res$iNextEst$size_based, paste(HOME_, "acc_curve_all_regions_only_species.csv", sep = "/"))
 
+
 incidence_freq_list <- list()
 for (region in unique(genus_observation$Region)) {
   regional_df <- genus_observation %>% filter(Region == region)
@@ -121,6 +133,35 @@ for (region in unique(genus_observation$Region)) {
 endpoint <- genus_observation %>% group_by(Region) %>% summarise(n_samples = n_distinct(id, Date)) %>% pull(n_samples) %>% max() + 10
 res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = endpoint)
 write.csv(res$iNextEst$size_based, paste(HOME_, "acc_curve_all_regions_only_genera.csv", sep = "/"))
+
+
+incidence_freq_list <- list()
+for (region in unique(common_species_observation$Region)) {
+  region_df <- common_species_observation %>% filter(Region == region)
+  incidence_freq_dataframe <- merge(
+      region_df %>% summarise(n_samples = n_distinct(id, Date)),
+      region_df %>% select(-c(id, Date, Region)) %>% summarise_all(~sum(. != 0))
+      )
+  incidence_freq_dataframe <- incidence_freq_dataframe %>% .[. != 0]
+  incidence_freq_list[[region]] <- incidence_freq_dataframe
+}
+endpoint <- common_species_observation %>% group_by(Region) %>% summarise(n_samples = n_distinct(id, Date)) %>% pull(n_samples) %>% max() + 10
+res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = endpoint)
+write.csv(res$iNextEst$size_based, paste(HOME_, "acc_curve_all_regions_only_common_species.csv", sep = "/"))
+
+incidence_freq_list <- list()
+for (region in unique(common_genera_observation$Region)) {
+  region_df <- common_genera_observation %>% filter(Region == region)
+  incidence_freq_dataframe <- merge(
+      region_df %>% summarise(n_samples = n_distinct(id, Date)),
+      region_df %>% select(-c(id, Date, Region)) %>% summarise_all(~sum(. != 0))
+      )
+  incidence_freq_dataframe <- incidence_freq_dataframe %>% .[. != 0]
+  incidence_freq_list[[region]] <- incidence_freq_dataframe
+}
+endpoint <- common_genera_observation %>% group_by(Region) %>% summarise(n_samples = n_distinct(id, Date)) %>% pull(n_samples) %>% max() + 10
+res <- iNEXT(incidence_freq_list, datatype = "incidence_freq", q = 0, conf = 0.95, endpoint = endpoint)
+write.csv(res$iNextEst$size_based, paste(HOME_, "acc_curve_all_regions_only_common_genera.csv", sep = "/"))
 
 
 acc_curve_genera <- read.csv(paste(HOME_, "acc_curve_all_regions_only_genera.csv", sep = "/")) %>% rename(Region = Assemblage) 
@@ -162,10 +203,54 @@ plot_title <- "acc_curve_all_regions_genera_species_bar.pdf"
 ggsave(paste(HOME_, plot_title, sep = "/"), p, width = 15, height = 10)
 
 
+acc_curve_genera <- read.csv(paste(HOME_, "acc_curve_all_regions_only_common_genera.csv", sep = "/")) %>% rename(Region = Assemblage) 
+acc_curve_species <- read.csv(paste(HOME_, "acc_curve_all_regions_only_common_species.csv", sep = "/")) %>% rename(Region = Assemblage) 
+acculumated_richness <- rbind(
+  acc_curve_genera %>%
+  group_by(Region) %>%
+  filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1) %>% 
+  mutate(Level = "Genera") , 
+  acc_curve_species %>%
+  group_by(Region) %>%
+  filter(abs(t - 50) == min(abs(t - 50))) %>% slice(1) %>% 
+  mutate(Level = "Species") 
+)
+acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("FVG", "VEN", "EMR", "MAR", "ABR", "MOL", "PUG", "BAS", "CAL", "SIC", "CAM","LAZ", "TOS", "LIG", "SAR"))
 
+custom_palette <- rep("black", length(unique(acculumated_richness$Region)))
+names(custom_palette) <- unique(acculumated_richness$Region)
+p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Region)) + 
+    geom_bar(stat = "identity", position = position_dodge(), aes(y = qD, fill = Level), colour = "black", linewidth = 1, alpha = 1) +
+    geom_errorbar(aes(ymin = qD.LCL, ymax = qD.UCL, group = Level), width = 0.5, position = position_dodge(width = 1))  +
+    theme_bw(base_size = 18) +
+    labs(x = "Region", y = "Estimated richness") +
+    ggtitle("Estimated richness of species and genera") +
+    theme(
+      axis.title.x = element_text(size = 20),
+      axis.title.y = element_text(size = 20),
+      axis.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 15), 
+      legend.text = element_text(size = 15),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 25),
+      legend.position = "bottom",
+      legend.title = element_blank(), 
+      legend.margin=margin(0,0,0,0),
+      legend.box.margin=margin(t = -10)
+    )
+p
+plot_title <- "acc_curve_all_regions_genera_species_bar.pdf"
+ggsave(paste(HOME_, plot_title, sep = "/"), p, width = 15, height = 10)
 
+phyto_abund %>% dplyr::filter(Det_level == "Unknown") %>% group_by(Region) %>% 
+ggplot() + 
+geom_boxplot(aes(x = Region, y = log10(Num_cell_l)))
 
-
+phyto_abund %>% group_by(Region, Date, id) %>% summarise(
+  Abund = sum(Num_cell_l[Det_level == "Unknown"]),
+  n_species = n_distinct(Taxon[Det_level == "Species"]),
+  n_genera = n_distinct(Genus[Det_level == "Genus"])
+) %>% ggplot() + 
+geom_point(aes(x = log10(Abund + 1), y = n_genera, color = Region))
 ##PER BASIN##
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
 genus_observation <- phyto_abund %>% 

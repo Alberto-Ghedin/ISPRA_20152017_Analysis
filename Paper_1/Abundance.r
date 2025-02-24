@@ -50,7 +50,7 @@ phyto_abund %>% dplyr::filter(Region == "CAL") %>% pull(id) %>% unique()
 colors <- scales::hue_pal()(length(unique(abund$Region)))
 palette <- setNames(colors, unique(abund$Region))
 abund %>% ggplot() +
-geom_boxplot(aes(x = id, y = Num_cell_l, fill = Region)) + 
+geom_boxplot(aes(x = id, y = log10(Num_cell_l +1), fill = Region)) + 
 scale_fill_manual(values = palette) 
 
 abund_groups <- phyto_abund %>% mutate(
