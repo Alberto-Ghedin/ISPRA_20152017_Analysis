@@ -40,18 +40,39 @@ abund <- phyto_abund %>%
 abund$Region <- factor(abund$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
 abund$Basin <- factor(abund$Basin, levels = ordered_basins, ordered = TRUE)
 
+abund %>% dplyr::filter(Region == "SIC") %>% pull(id) %>% unique() %>% sort()
 library(rjson)
 params <- fromJSON(file = file.path(HOME_, "params.json"))
 abund$id <- factor(abund$id, levels = params$ordered_id, ordered = TRUE)
 
-phyto_abund %>% dplyr::filter(Region == "SIC") %>% pull(id) %>% unique()
-phyto_abund %>% dplyr::filter(Region == "CAL") %>% pull(id) %>% unique()
+
+chem_phys <- read.csv("./df_chem_phys.csv")
+chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
+chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))
+chem_phys$id <- factor(chem_phys$id, levels = params$ordered_id, ordered = TRUE)
+
 
 colors <- scales::hue_pal()(length(unique(abund$Region)))
 palette <- setNames(colors, unique(abund$Region))
-abund %>% ggplot() +
-geom_boxplot(aes(x = id, y = log10(Num_cell_l +1), fill = Region)) + 
-scale_fill_manual(values = palette) 
+abund %>% mutate(index_id = match(id, params$ordered_id))  %>% 
+ggplot(aes(x = id, y = log10(Num_cell_l +1), fill = Region)) +
+geom_boxplot() + 
+facet_wrap(~Season) +
+scale_fill_manual(values = palette)
+
+abund %>% mutate(index_id = match(id, params$ordered_id))  %>% 
+ggplot(aes(x = index_id, y = log10(Num_cell_l +1))) +
+geom_point(aes(color = Region), shape = 20) + 
+scale_color_manual(values = palette) +
+geom_smooth(formula = y ~ s(x, bs = "cs", fx = TRUE, k = 30))  
+
+
+colors <- scales::hue_pal()(length(unique(abund$Region)))
+palette <- setNames(colors, unique(abund$Region))
+chem_phys %>% ggplot() +
+geom_boxplot(aes(x = id, y = Salinity, fill = Region)) +
+scale_fill_manual(values = palette) + 
+scale_y_reverse()
 
 abund_groups <- phyto_abund %>% mutate(
     higher_group = case_when(
@@ -72,6 +93,7 @@ summarise(
 abund_groups$Region <- factor(abund_groups$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
 abund_groups$Basin <- factor(abund_groups$Basin, levels = ordered_basins, ordered = TRUE)
 abund_groups$Season <- factor(abund_groups$Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)
+
 
 p <- ggplot(abund) + 
 geom_point(aes(x = Longitude, y = Num_cell_l, color = Region)) +
@@ -151,6 +173,55 @@ ggsave(
     height = 13, 
     dpi = 300
 )
+
+fold_change <- abund_groups %>% dplyr::filter(Region %in% c("FVG", "VEN", "EMR")) %>% 
+mutate(
+    Group = case_when(
+        higher_group == "Dinoflagellata" ~ "DIN",
+        higher_group == "Bacillariophyceae" ~ "DIA",
+        higher_group == "Coccolithophyceae" ~ "COC",
+        higher_group == "Cryptophyceae" ~ "CRY",
+        higher_group != "Unknown" ~ "Else",
+        higher_group == "Unknown" ~ "UNK"
+    )
+) %>% group_by(id, Date, Group) %>% summarise(Abund = sum(Abund), Season = first(Season), Basin = first(Basin), .groups = "drop") %>%
+group_by(Season, Basin, Group) %>% 
+mutate(seasonal_abund = median(Abund)) %>% 
+group_by(Basin, Group) %>% mutate(mean_abund = median(Abund)) %>% 
+mutate(fold_change = seasonal_abund / mean_abund) 
+
+abund_percetile <- abund_groups %>% 
+mutate(
+    Group = case_when(
+        higher_group == "Dinoflagellata" ~ "DIN",
+        higher_group == "Bacillariophyceae" ~ "DIA",
+        higher_group == "Coccolithophyceae" ~ "COC",
+        higher_group == "Cryptophyceae" ~ "CRY",
+        higher_group != "Unknown" ~ "Else",
+        higher_group == "Unknown" ~ "UNK"
+    )
+) %>% group_by(id, Date, Group) %>% summarise(Abund = sum(Abund), Season = first(Season), Basin = first(Basin), .groups = "drop") %>% 
+group_by(Season, Basin, Group) %>% summarise(percetile = quantile(Abund, 0.95), .groups = "drop")
+
+p <- fold_change %>% ggplot(aes(x = Season, y = Group, fill = fold_change)) +
+geom_tile() +
+geom_text(aes(label = round(fold_change, 2)), #colour = ifelse(Abund > 1e4, "black", "white")), 
+size = 8) + 
+#facet_wrap(~Basin, ncol = 2) + 
+labs(title = "Distribution of abundance of main phytoplankton groups", x = "Season", y = "Group") +
+ggplot_theme + theme(legend.position = "bottom") +
+ggplot_fill_scale(c(0, 5), "Abundance [cell/L] (log scale)") 
+p
+
+p <- abund_percetile %>% ggplot(aes(x = Season, y = Group, fill = log10(percetile +1))) +
+geom_tile() +
+geom_text(aes(label = sciencific_notation(percetile)), #colour = ifelse(Abund > 1e4, "black", "white")),
+size = 8) +
+facet_wrap(~Basin, ncol = 2) +
+labs(title = "Distribution of abundance of main phytoplankton groups", x = "Season", y = "Group") +
+ggplot_theme + theme(legend.position = "bottom") +
+ggplot_fill_scale(NULL, "Abundance [cell/L] (log scale)")
+p
 
 select_group <-  c("DIAT", "DINO", "COCC", "CRYP")
 group <- "CRYP"
