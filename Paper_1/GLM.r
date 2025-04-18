@@ -4,7 +4,9 @@ library(tidyr)
 library(MASS) 
 library(lme4)
 library(glmmTMB)
-
+library(corrplot)
+library(car)
+library(tibble)
 model_val <- function(model) {
     op <- par(mfrow = c(2, 2))
     plot(model)
@@ -29,57 +31,150 @@ from_region_to_abreviation <- c(
     "Sardegna" = "SAR"
 )
 HOME_ <- "."
-phyto_abund <- read.csv(paste(HOME_, "phyto_abund.csv", sep = "/"))
+phyto_abund <- read.csv("./phyto_abund.csv") %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% mutate(
+    New_basin = case_when(
+        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
+        Region %in% c("MAR", "ABR") ~ "CA", 
+        Region == "MOL" ~ "SA",
+        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
+        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Region == "BAS" ~ "SM",
+        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Region == "SIC" ~ "SIC", 
+        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Region == "CAM" ~ "ST",
+        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
+        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Region == "TOS" ~ "NT",
+        Region == "LIG" ~ "LIG",
+        Region == "SAR" ~ "SAR"
+    )
+    )
 chem_phys <- read.csv("./df_chem_phys.csv")
 chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
 chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))
 sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(sample_abund = as.integer(sum(Num_cell_l)), Region = first(Region), Season = first(Season), Basin = first(Basin)) 
+sample_abund <- sample_abund %>% mutate(
+    New_basin = case_when(
+        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
+        Region %in% c("MAR", "ABR") ~ "CA", 
+        Region == "MOL" ~ "SA",
+        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
+        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Region == "BAS" ~ "SM",
+        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Region == "SIC" ~ "SIC", 
+        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Region == "CAM" ~ "ST",
+        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
+        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Region == "TOS" ~ "NT",
+        Region == "LIG" ~ "LIG",
+        Region == "SAR" ~ "SAR"
+    )
+)
 
-sample_abund %>% group_by(Region, Season) %>% summarise(mean = mean(sample_abund), sd = sd(sample_abund)) %>% 
-ggplot() + geom_point(aes(x = log10(mean), y = log10(sd), color = Region, shape = Season)) + theme_minimal() + labs(x = "Mean", y = "SD")
 
-chem_phys %>% dplyr::select(-c(Secchi_depth, id, Date, E_cond)) %>% pivot_longer(cols = -Region, names_to = "var", values_to = "value") %>% 
-ggplot() +
-geom_boxplot(aes(x = Region, y = value))  + facet_wrap(~ var, scale = "free_y") + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x = "Variable", y = "Value")
+log_trans <- function(x) {
+    eps <- x[x != 0] %>% na.omit() %>% min()
+    return(as.numeric(log10(x + eps)))
+}
+boxcox_transform <- function(values) {
+  
+  if (any(is.na(values))) {
+    clean_values <- as.numeric(na.omit(values))
+  } else {
+     clean_values <- as.numeric(values)
+  }
+  if (min(clean_values) == 0.0) {
+    min_val <- clean_values[clean_values != 0] %>% min()
+    clean_values <- clean_values + min_val * 0.1
+  }
 
-data_fit <-merge(
-    chem_phys %>% dplyr::select(c(-Region, -Secchi_depth, -E_cond, -O_sat)), 
-    sample_abund, how = "inner", by = c("Date", "id")
-    ) %>% dplyr::select(-c(Date, id)) %>% 
-    dplyr::filter(pH > 7, PO4 < 2)
-
-chem_phys %>% colnames()
-regression_plot_region <- function(data, var) {
-    var_sym <- sym(var)
-    data %>% dplyr::select(Region, Season, sample_abund, !!var_sym) %>% na.omit() %>% 
-    ggplot(aes(y = log10(sample_abund), x = !!var_sym, color = Region, shape = Season)) + 
-    geom_point() + facet_wrap(~Region, scales = "free") + 
-    geom_smooth(aes(x = !!var_sym, y = log10(sample_abund)), method = "lm") + 
-    labs(title = var)
+  lambda <- MASS::boxcox(clean_values ~ 1, plotit = FALSE)
+  max_lambda <- lambda$x[which(lambda$y == max(lambda$y))]
+  if (max_lambda == 0) {
+    clean_values <- log(clean_values)
+  } else {
+    clean_values <- (clean_values^max_lambda - 1) / max_lambda
+  }
+  values[which(!is.na(values))] <- clean_values
+  return(values)
 }
 
-regression_plot_region(data_fit, "Chla")
-regression_plot_region(data_fit, "DO")
-regression_plot_region(data_fit, "NH4")
-regression_plot_region(data_fit, "NO3")
-regression_plot_region(data_fit, "NO2")
-regression_plot_region(data_fit, "PO4")
-regression_plot_region(data_fit, "SiO4")
-regression_plot_region(data_fit, "Salinity")
-regression_plot_region(data_fit, "TN")
-regression_plot_region(data_fit, "TP")
-regression_plot_region(data_fit, "pH")
-regression_plot_region(data_fit, "T")
+vars <- c("DO", "NH4", "NO3", "PO4", "SiO4", "Salinity", "TN", "TP", "T", "pH")
+vars_to_transform <- c("NH4", "NO3", "pH", "PO4", "Salinity", "SiO4", "TN", "TP", "T")
+chem_phys %>% dplyr::select(-c(Secchi_depth, id, Date, E_cond, Chla, NO2, O_sat)) %>% 
+mutate(across(all_of(vars_to_transform), boxcox_transform)) %>% 
+pivot_longer(cols = -Region, names_to = "var", values_to = "value") %>% 
+ggplot() +
+geom_histogram(aes(x = value))  + facet_wrap(~ var, scale = "free") + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x = "Variable", y = "Value")
+
+data_fit <-merge(
+    chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla, O_sat))  %>% 
+    dplyr::filter(pH > 7, PO4 < 2, TN / TP < 120) %>% 
+    mutate(across(all_of(vars_to_transform), boxcox_transform)), 
+    sample_abund, how = "inner", by = c("Date", "id")
+    ) %>% dplyr::select(-c(Date, id))
+    
+
+
+
+
+
+
+abund_only_genera <- phyto_abund %>% mutate(
+    Det_level = case_when(
+        Class == "nan" ~ Taxon,
+        Genus == "" ~ Class,
+        TRUE ~ Genus
+    )
+) %>% group_by(Date, id, Det_level) %>% 
+summarize(
+    Abund = sum(Num_cell_l), 
+    basin = first(New_basin),
+    Season = first(Season),
+    .groups = "drop"
+) %>% pivot_wider(names_from = Det_level, values_from = Abund, values_fill = 0)
+
+
+
+
+merge(
+    sapply(
+    names(estimates),
+    function(name) {
+    return(
+estimates[[name]][1, ])
+}
+) %>% as.data.frame() %>% rownames_to_column(var = "Region") %>% pivot_longer(cols = -Region, names_to = "Var", values_to = "Estimate"), 
+sapply(
+    names(estimates),
+    function(name) {
+    return(
+estimates[[name]][2, ])
+}
+) %>% as.data.frame() %>% rownames_to_column(var = "Region") %>% pivot_longer(cols = -Region, names_to = "Var", values_to = "p_value"), 
+by = c("Region", "Var")
+) %>% ggplot() + 
+geom_col(aes(x = Region, y = Estimate, fill = ifelse(p_value < 0.05, "blue", "red")), position = "dodge") + 
+facet_wrap(~Var, scales = "free") + 
+scale_fill_manual(values = c("blue", "red"))
+
+
+
+
+
 
 season <- "Winter"
+correlation <- chem_phys %>% dplyr::select(-c(Region, id, Date, E_cond)) %>% 
+mutate(across(all_of(vars), log_trans)) %>% na.omit() %>% cor()
 
-append(
-    list(A = 1, b = 2), 
-    c(3, 
-    4)
-)
-data_fit %>% group_split(Season, Region) 
-var <- "Chla"
+
+corrplot.mixed(correlation, order = 'AOE')
+
+
+
 lm_statistic <- function(data, var, spat_col = "Region") {
     region <- data[[spat_col]][1]
     season <- data$Season[1]
@@ -102,17 +197,22 @@ lm_statistic <- function(data, var, spat_col = "Region") {
     )
 }
 
-model <- lm(formula(paste("log10(sample_abund) ~", var)), data = data_fit)
+variables <- c("DO", "NH4", "NO3","PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T")
+model <- lm(formula(paste("log10(sample_abund) ~", paste(variables, collapse = "+"))), data = data_fit %>% na.omit())
+summary(model)
+car::vif(model)
 summary(model)$coefficients[2, c(1,4)] %>% as.list()
 
-variables <- c("Chla", "DO", "NH4", "NO3", "NO2", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T")
+paste("log10(sample_abund) ~", vars, collapse = "+")
+
+
 
 statistics <- bind_rows(
     lapply(variables, function(x) {lapply(data_fit %>% group_split(Season, Region), function(y) lm_statistic(y, x)) %>% bind_rows()}) 
     )# %>% na.omit()
 statistics$Region <- factor(statistics$Region, levels = unname(from_region_to_abreviation))
 statistics$Season <- factor(statistics$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
-statistics %>% head()
+
 
 
 statistics %>% mutate(Estimate = case_when(
