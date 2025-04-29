@@ -4,6 +4,7 @@ library(tidyr)
 library(MASS) 
 library(corrplot)
 library(tibble)
+library(openxlsx)
 
 IMAGE_FORMAT <- "svg"
 from_region_to_abreviation <- c(
@@ -46,7 +47,17 @@ phyto_abund <- read.csv("./phyto_abund.csv") %>% dplyr::filter(!(id == "VAD120" 
 chem_phys <- read.csv("./df_chem_phys.csv")
 chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
 chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))
-sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(sample_abund = as.integer(sum(Num_cell_l)), Region = first(Region), Season = first(Season), Basin = first(Basin)) 
+
+
+
+sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(
+    sample_abund = as.integer(sum(Num_cell_l)), 
+    Region = first(Region), 
+    Season = first(Season), 
+    Basin = first(Basin),
+    Closest_coast = first(Closest_coast),
+    SeaDepth = first(SeaDepth)
+    ) 
 sample_abund <- sample_abund %>% mutate(
     New_basin = case_when(
         Region %in% c("FVG", "VEN", "EMR") ~ "NA",
@@ -66,6 +77,17 @@ sample_abund <- sample_abund %>% mutate(
         Region == "SAR" ~ "SAR"
     )
 )
+
+#Open file excel by reading all sheets
+sheets <- getSheetNames("./MEMs_per_basin.xlsx")
+mems <- sapply(
+    sheets,
+    function(sheet) {
+    data <- read.xlsx("./MEMs_per_basin.xlsx", sheet = sheet)
+    }, 
+    simplify = FALSE
+    )
+
 
 log_trans <- function(x) {
     eps <- x[x != 0] %>% na.omit() %>% min()
@@ -111,25 +133,29 @@ regression_plot_region <- function(data, var, log_env = FALSE) {
     labs(title = var)
 }
 
+chem_phys %>% dplyr::select(NO2, NH4, NO3) %>% ggplot() + 
+geom_point(aes(x = NO2 + NO3 + NH4, y = NO3 + NH4)) + 
+xlim(c(0,20)) + 
+ylim(c(0,20)) 
+
 chem_phys <- chem_phys %>% mutate(NO_rat = NO2 / NO3, 
-                    DIN_TN = (NH4 + NO3 + NO2) / TN,
+                    DIN_TN = (NH4 + NO3) / TN,
                     P_rat = PO4 / TP
 )
 chem_phys %>% dplyr::select(-c(Region, id, Date, E_cond)) %>% apply(2, function(x) shapiro.test(x[is.finite(x)])$statistic)
 
-vars_to_transform <- c("Chla", "NH4", "NO2", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "NO_rat", "DIN_TN", "P_rat", "pH", "O_sat")
+vars_to_transform <- c("Chla", "NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "DIN_TN", "pH", "O_sat")
 data_fit <-merge(
-    chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth))  %>% 
+    chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, NO_rat, P_rat))  %>% 
     dplyr::filter(pH > 7, PO4 < 2, TN / TP < 120) %>% 
     mutate(across(all_of(vars_to_transform), boxcox_transform)), 
     sample_abund, how = "inner", by = c("Date", "id")
-    ) %>% dplyr::select(-c(Date, id))
+    )
 
 
-chem_phys %>% mutate(No2_cont = NO2 / (NO2 + NO3 + NH4)) %>% pull(No2_cont) %>% na.omit() %>% hist(breaks = 20)
+cleaned_data <- data_fit %>% 
+    na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
 
-chem_phys %>% dplyr::select(NO2, NH4, NO3) %>% ggplot() + 
-geom_point(aes(x = NO2 + NO3 + NH4, y = NO2 + NH4)) 
 
 regression_plot_region(data_fit, "Chla")
 regression_plot_region(data_fit, "DO")
@@ -148,51 +174,44 @@ regression_plot_region(data_fit, "NO_rat", log_env = FALSE)
 regression_plot_region(data_fit, "DIN_TN", log_env = FALSE)
 regression_plot_region(data_fit, "P_rat", log_env = FALSE)
 
-fit_reg_basin <- function(group, group_col, var) {
-    cleaned_data <- data_fit %>% dplyr::filter(!!sym(group_col) == group) %>% 
-            dplyr::select(!!sym(group_col), !!sym(var), sample_abund) %>%
-            na.omit() %>% dplyr::filter(is.finite(!!sym(var)))
+
+
+fit_reg_basin <- function(group, group_col, vars) {
     if (nrow(cleaned_data) < 3) {
         return(c(NA, NA))
     }
         model <- lm(
-            paste("log10(sample_abund) ~", var), 
-            data = cleaned_data
+            paste("log10(sample_abund) ~", paste(vars, collapse = " + ")), 
+            data = cleaned_data %>% dplyr::filter(!!sym(group_col) == group)
         )
-        return(summary(model)$coefficients[2, c(1,4)])
+        return(
+            summary(model)$coefficients[-1, c(1,4)] %>% 
+            as.data.frame() %>% 
+            rownames_to_column(var = "Var") %>% 
+            rename(p_value = `Pr(>|t|)`)
+        )
     }
 
+data_fit %>% head()
+res <- fit_reg_basin("NA", "New_basin", c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "P_rat"))
+res
 
-estimates <- mapply(
-    function(var) {
-        mapply(
-            fit_reg_basin, 
-            group = data_fit %>% pull(New_basin) %>% unique(),
-            group_col = "New_basin",
-            var = var
+estimates <- sapply(
+    data_fit %>% pull(New_basin) %>% unique(),
+    function(basin) {
+        fit_reg_basin(
+            group = basin, 
+            group_col = "New_basin", 
+            vars = c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "P_rat")
         )
-    }, 
-    c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "NO2", "NO_rat", "DIN_TN", "P_rat"), 
-    SIMPLIFY = FALSE
-)
+        },
+    simplify = FALSE
+    )
 
 
-p <- merge(
-    sapply(
-    names(estimates),
-    function(name) {
-    return(
-estimates[[name]][1, ])
-}
-) %>% as.data.frame() %>% rownames_to_column(var = "Region") %>% pivot_longer(cols = -Region, names_to = "Var", values_to = "Estimate"), 
-sapply(
-    names(estimates),
-    function(name) {
-    return(
-estimates[[name]][2, ])
-}
-) %>% as.data.frame() %>% rownames_to_column(var = "Region") %>% pivot_longer(cols = -Region, names_to = "Var", values_to = "p_value"), 
-by = c("Region", "Var")
+
+p <- do.call(rbind, estimates) %>% mutate(
+    Region = rep(names(estimates), each = nrow(estimates[[1]])) 
 ) %>%
 mutate(
     Region = factor(Region, levels = c("NA", "CA", "SA", "SM", "ST", "NT", "LIG", "SAR", "SIC"))
@@ -202,6 +221,7 @@ geom_col(aes(x = Region, y = Estimate, fill = ifelse(p_value < 0.05, "<0.05", ">
 facet_wrap(~Var, scales = "free") + 
 scale_fill_manual(values = c("blue", "red")) + 
 labs(fill = "Significance")
+
 
 ggsave(
     filename = "lm_abund_chem_basins",
@@ -261,14 +281,181 @@ ggsave(
     dpi = 300
 )
 
-vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "NO2")
-chem_phys %>% dplyr::select(all_of(c("id", "Date", "Region", vars))) %>% na.omit() %>% 
-merge(sample_abund %>% dplyr::select(id, Date, New_basin), 
-by = c("id", "Date")) %>% 
-dplyr::select(-c(id, Date)) %>% 
-pivot_longer(cols = all_of(vars), names_to = "Variable", values_to = "Value") %>% 
-ggplot(aes(y = Value, x = New_basin)) +
-geom_boxplot() +
-facet_wrap(~Variable, scales = "free")
 
-chem_phys$NO2 %>% log2 %>% hist()
+#MEMs addition and Cloasest_coast and SeaDepth, Season
+cleaned_data %>% head()
+
+vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "O_sat", "Closest_coast", "SeaDepth")
+library(vegan)
+data_reduced <- merge(
+            cleaned_data %>% dplyr::filter(New_basin == name), 
+            mems[[name]],
+            by = "id"
+        ) %>% dplyr::mutate(across(where(is.numeric), ~ decostand(., "standardize")))
+
+mem_models <- sapply(
+    names(mems), 
+    function(name) {
+        expls <- c(
+                    colnames(mems[[name]])[-1],
+                    vars
+                    )
+        data_reduced <- merge(
+            cleaned_data %>% dplyr::filter(New_basin == name), 
+            mems[[name]],
+            by = "id"
+        ) %>% dplyr::mutate(across(all_of(expls), ~ decostand(., "standardize")))
+    model <- lm(
+        paste(
+            "log10(sample_abund) ~", 
+            paste(
+                expls, 
+                collapse = " + "
+                )
+                ), 
+        data = data_reduced
+    )   
+    return(model) 
+    }, 
+    simplify = FALSE
+)
+
+
+selections <- 
+sapply(
+    names(mem_models), 
+    function(name) {
+        expls <- c(
+                    colnames(mems[[name]])[-1],
+                    vars
+                    )
+        data_reduced <- merge(
+            cleaned_data %>% dplyr::filter(New_basin == name), 
+            mems[[name]],
+            by = "id"
+        ) %>% dplyr::mutate(across(all_of(expls), ~ decostand(., "standardize")))
+        newvars <- which(vif(mem_models[[name]]) < 10) %>% names()
+    return(
+        lm(
+            paste(
+            "log10(sample_abund) ~", 
+            paste(
+                newvars, 
+                collapse = " + "
+                )
+                ), data = data_reduced)
+    )
+    }, 
+    simplify = FALSE
+)
+vif(mem_models[[1]])
+which(vif(mem_models[[1]]) < 10) %>% names()
+coefs <- sapply(
+    names(selections), 
+    function(name) {
+        return(
+            summary(selections[[name]])$coefficients[-1, c(1,4)] %>% 
+            as.data.frame() %>% 
+            rownames_to_column(var = "Var") %>% 
+            rename(p_value = `Pr(>|t|)`) %>% 
+            mutate(Region = name)
+        )
+    }, 
+    simplify = FALSE
+)
+do.call(rbind, coefs) %>% dplyr::filter(!grepl("MEM", Var)) %>% 
+ggplot() + 
+geom_col(aes(x = Region, y = Estimate, fill = ifelse(p_value < 0.05, "<0.05", ">0.05")), position = "dodge") +
+facet_wrap(~Var, scales = "free_y")
+
+
+
+
+library(glmnet)
+lasso_models <- 
+sapply(
+    names(mem_models), 
+    function(name) {
+        expls <- c(
+                    colnames(mems[[name]])[-1],
+                    vars
+                    )
+        data_reduced <- merge(
+            cleaned_data %>% dplyr::filter(New_basin == name), 
+            mems[[name]],
+            by = "id"
+        ) %>% dplyr::mutate(across(all_of(expls), ~ decostand(., "standardize")))
+        model <- cv.glmnet(
+        x = as.matrix(data_reduced %>% 
+        dplyr::select(
+            all_of(expls)
+            )
+            ),
+        y = log10(data_reduced$sample_abund + 1),
+        alpha = 1,
+        nfolds = 40
+    )
+    model <- glmnet(
+        x = as.matrix(data_reduced %>% 
+        dplyr::select(
+            all_of(expls)
+            )
+            ),
+        y = log10(data_reduced$sample_abund + 1),
+        alpha = 1,
+        lambda = model$lambda.min
+    )
+    return(
+        model
+    )
+    }, 
+    simplify = FALSE
+)
+
+coefs <- sapply(
+    names(lasso_models), 
+    function(name) {
+        return(
+            data.frame(
+                as.matrix(coef(lasso_models[[name]]))[-1, ]
+            ) %>% dplyr::mutate(Region = name) %>% 
+            dplyr::rename(coef = 1) %>% 
+            rownames_to_column(var = "Var")
+        )
+    }, 
+    simplify = FALSE
+)
+do.call(rbind, coefs) %>% dplyr::filter(!grepl("MEM", Var)) %>% 
+ggplot() + 
+geom_col(aes(x = Region, y = coef), position = "dodge") +
+facet_wrap(~Var, scales = "free_y")
+
+rda_models <- sapply(
+    names(mems), 
+    function(name) {
+        data <- merge(
+            cleaned_data %>% dplyr::filter(New_basin == name), 
+            mems[[name]],
+            by = "id"
+        )
+    return(rda(data[, vars] ~ ., data[, colnames(mems[[name]])[-1]], scale = TRUE))
+    }, 
+    simplify = FALSE
+)
+
+selection <- sapply(
+    rda_models, function(x){
+    return(ordistep(
+        x, 
+        scope = x, 
+        direction = "backward", 
+        pstep = 0.05, 
+        perm.max = 200
+    )
+    )
+}, 
+simplify = FALSE
+)
+
+
+
