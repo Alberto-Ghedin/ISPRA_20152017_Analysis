@@ -9,9 +9,10 @@ library(readxl)
 library(indicspecies)
 library(MASS)
 library(dplyr)
+library(openxlsx)
+
 
 IMAGE_FORNMAT <- "svg"
-
 boxcox_transform <- function(values) {
   
   if (any(is.na(values))) {
@@ -19,11 +20,16 @@ boxcox_transform <- function(values) {
   } else {
      clean_values <- as.numeric(values)
   }
+
+  if (any(is.infinite(clean_values))) {
+    clean_values <- as.numeric(clean_values[is.finite(clean_values)])
+  }
+
+
   if (min(clean_values) == 0.0) {
     min_val <- clean_values[clean_values != 0] %>% min()
     clean_values <- clean_values + min_val * 0.1
   }
-
   lambda <- MASS::boxcox(clean_values ~ 1, plotit = FALSE)
   max_lambda <- lambda$x[which(lambda$y == max(lambda$y))]
   if (max_lambda == 0) {
@@ -31,7 +37,7 @@ boxcox_transform <- function(values) {
   } else {
     clean_values <- (clean_values^max_lambda - 1) / max_lambda
   }
-  values[which(!is.na(values))] <- clean_values
+  values[which(!(is.na(values) | is.infinite(values)))] <- clean_values
   return(values)
 }
 
@@ -64,15 +70,27 @@ mutate(
     )
 )
 
-vars <- c("DO", "NH4", "NO3", "PO4", "SiO4", "Salinity", "TN", "TP", "T", "pH")
-vars_to_transform <- c("Chla", "NH4", "NO2", "NO3","PO4", "Salinity", "SiO4", "TN", "TP")
+vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "O_sat", "Closest_coast", "SeaDepth")
+vars_to_transform <- c("NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "DIN_TN", "pH", "O_sat", "DIN_TN", "P_rat")
 
-chem_phys <- read.csv("./df_chem_phys.csv") %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla, O_sat)) %>% 
-    dplyr::filter(pH > 7, PO4 < 2, TN / TP < 120) %>% na.omit() %>% 
-    mutate(across(all_of(c("NH4", "NO3", "PO4", "SiO4", "TN", "TP", "Salinity")), boxcox_transform))
 
-chem_phys %>% dplyr::select(-c(Date, id)) %>% pivot_longer(cols = vars, names_to = "Variable", values_to = "Value") %>%
-ggplot(aes(x = Value)) + geom_histogram() + facet_wrap(~Variable, scales = "free")
+chem_phys <- read.csv("./df_chem_phys.csv") %>% 
+dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla)) %>%
+dplyr::filter(pH > 7, PO4 < 2, TN / TP < 120) %>% 
+mutate(
+  DIN_TN = (NH4 + NO3) / TN,
+  P_rat = PO4 / TP
+  ) %>% 
+mutate(across(all_of(vars_to_transform), boxcox_transform)) %>% 
+na.omit() %>% 
+dplyr::filter(if_all(where(is.numeric), ~ is.finite(.))) %>% merge(
+  phyto_abund %>% dplyr::distinct(id, Closest_coast, SeaDepth), 
+  by = "id"
+)
+
+
+
+
 
 sheets <- excel_sheets("./indval_only_genera_per_basin.xlsx")
 all_data <- sapply(sheets, function(sheet) {
@@ -98,10 +116,22 @@ summarize(
 ) %>% pivot_wider(names_from = Genus, values_from = Abund, values_fill = 0)
 
 
+#MEMS 
+sheets <- getSheetNames("./MEMs_per_basin.xlsx")
+mems <- sapply(
+    sheets,
+    function(sheet) {
+    data <- read.xlsx("./MEMs_per_basin.xlsx", sheet = sheet)
+    }, 
+    simplify = FALSE
+    ) 
+names(mems) <- sheets
+
 
 create_resp_expl_data <- function(
   env_data,
   sites_taxa,
+  mems, 
   covariates, 
   species,
   log_transform = FALSE, 
@@ -113,7 +143,12 @@ create_resp_expl_data <- function(
         env_data,
         by = c("id", "Date"),
         all = FALSE
-    ) %>% dplyr::filter(rowSums(across(all_of(species))) > 0)
+    ) %>% dplyr::filter(rowSums(across(all_of(species))) > 0) %>% 
+    merge(
+        mems,
+        by = "id",
+        all = FALSE
+    )
 
     resp <- RDA.data %>% dplyr::select(all_of(species)) %>% mutate(across(everything(), ~ if (log_transform) log1p(.) else .))
     if (!is.null(db)) {
@@ -121,78 +156,53 @@ create_resp_expl_data <- function(
     } else if (hellinger) {
         resp <- vegan::decostand(resp, method = "hellinger") #%>% mutate(across(everything(), ~ . - mean(.)))
     }
-    expl <- RDA.data %>% dplyr::mutate(across(all_of(covariates), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(c(covariates)))
+    mems_cols <- mems %>% dplyr::select(where(~is.numeric(.))) %>% colnames()
+    expl <- RDA.data %>% dplyr::mutate(across(all_of(c(covariates, mems_cols)), ~ decostand(., "standardize"))) %>% dplyr::select(all_of(c(covariates, mems_cols)))
     return(list(resp = resp, expl = expl, label = RDA.data %>% dplyr::select(all_of(c("id", "Date")))))
  }
 
+pull_taxa <- function(data, rate) {
+  return(
+    setdiff(
+      data %>% rowwise() %>%
+      dplyr::filter(max(c_across(where(is.numeric))) > rate) %>% 
+      ungroup() %>% pull(Taxon), 
+      c("Bacillariophyceae", "Dinoflagellata", "Dinophyceae", "Coccolithophyceae", "Cryptophyceae", "Other phytoplankton")
+      )
+      )
+}
 
 
-
-n_row <- abund_only_genera %>% dplyr::filter(Basin == basin) %>% nrow()
-selected_genera <- abund_only_genera %>% dplyr::filter(Basin == basin) %>% dplyr::select(where(~is.numeric(.))) %>% 
-dplyr::select(where(~ sum(. != 0) / n_row > 0.05)) %>% colnames()
-
-env_datas <- sapply(
+variation_partitionings <- sapply(
   names(all_data),
   function(basin) {
-    selected_genera <- all_data[[basin]] %>% rowwise() %>%
-  dplyr::filter(max(c_across(where(is.numeric))) > 0.5) %>%
-  ungroup() %>% pull(Taxon)
+    selected_genera <- pull_taxa(all_data[[basin]], 0.5)
     RDA.data <- create_resp_expl_data(
   env_data = chem_phys,
   sites_taxa = abund_only_genera %>% dplyr::filter(Basin == basin),
+  mems = mems[[basin]],
   covariates = vars,
-  species = setdiff(selected_genera, c("Bacillariophyceae", "Dinoflagellata", "Dinophyceae")),
-  log_transform = FALSE, 
-  db =  NULL, 
-  hellinger = TRUE
-)
-  return(RDA.data$expl)
-  }, 
-simplify = FALSE
-)
-names(env_datas) <- names(all_data)
-
-RDA.data$expl %>% head()
-pca.env <- rda(RDA.data$expl)
-pca.env$species
-biplot(pca.env, scaling = 2)
-RDA.data$resp
-pca.spec <- rda(RDA.data$resp)
-summary(pca.spec)
-model <- dbrda(RDA.data$resp ~ ., data = RDA.data$expl)
-summary(model)
-vegan::RsquareAdj(model)
-
-model <- cca(RDA.data$resp ~ ., data = RDA.data$expl)
-summary(model)
-ordiplot(model, scaling = 2, type = "text")
-
-
-
-cca_dir <- file.path(HOME_, "cca")
-dir.create(cca_dir, showWarnings = FALSE)
-sapply(
-  names(all_data),
-  function(basin) {
-    selected_genera <- all_data[[basin]] %>% rowwise() %>%
-  dplyr::filter(max(c_across(where(is.numeric))) > 0.5) %>%
-  ungroup() %>% pull(Taxon)
-    RDA.data <- create_resp_expl_data(
-  env_data = chem_phys,
-  sites_taxa = abund_only_genera %>% dplyr::filter(Basin == basin),
-  covariates = vars,
-  species = setdiff(selected_genera, c("Bacillariophyceae", "Dinoflagellata", "Dinophyceae", "Coccolithophyceae", "Cryptophyceae", "Other phytoplankton")),
+  species = selected_genera,
   log_transform = TRUE, 
   db =  NULL, 
   hellinger = FALSE
 )
-  model <- rda(RDA.data$resp ~ ., data = RDA.data$expl, tidy = TRUE)
+  mems_col <- RDA.data$expl %>% dplyr::select(dplyr::contains("MEM")) %>% colnames()
+  var_par <- vegan::varpart(
+    RDA.data$resp, 
+    RDA.data$expl[, mems_col], 
+    RDA.data$expl[, setdiff(colnames(RDA.data$expl), mems_col)], 
+    transfo = "hel"
+  )
+  return(var_par)
+  }, 
+  simplify = FALSE
+)
+
+make_triplot <- function(model, labels, basin) {
   sites <- cbind(
   scores(model, display = "sites"), 
-  RDA.data$label) %>% merge(
-    abund_only_genera %>% dplyr::select(id, Date, Season),
-    by = c("id", "Date")
+  labels
   )
   env_arrows <- scores(model, display = "bp")
   species <- scores(model, display = "species")
@@ -211,41 +221,134 @@ sapply(
   labs(title = paste("RDA for", basin, "basin"), x = paste("RDA1 (",perc[1], "%)", sep = "") , y = paste("RDA2 (",perc[2], "%)", sep = "")) + 
   theme_bw() + 
   theme(legend.position = "bottom")
+  
+  return(p)
+}
+
+compute_rda_model <- function(resp, expl, covariates, partial = FALSE, partial_covariates = NULL) {
+  if (partial) {
+    mod <- rda(
+      formula(
+        paste(
+          "resp ~", paste(covariates, collapse = " + "), 
+          "+ Condition(", 
+          paste(partial_covariates, collapse = " + "),
+          ")",
+          sep = " "
+        )
+      ), 
+    expl
+    )
+  } else {
+    mod <- rda(resp ~ ., expl)
+  }
+  return(mod)
+}
+
+rda_dir <- file.path(HOME_, "rda")
+dir.create(rda_dir, showWarnings = FALSE)
+models <- sapply(
+  names(all_data),
+  function(basin) {
+    selected_genera <- pull_taxa(all_data[[basin]], 0.5)
+    RDA.data <- create_resp_expl_data(
+  env_data = chem_phys,
+  sites_taxa = abund_only_genera %>% dplyr::filter(Basin == basin),
+  mems = mems[[basin]],
+  covariates = vars,
+  species = selected_genera,
+  log_transform = TRUE, 
+  db =  NULL, 
+  hellinger = FALSE
+)
+
+  resp <- RDA.data$resp
+  expl <- RDA.data$expl
+  mems_col <- RDA.data$expl %>% dplyr::select(dplyr::contains("MEM")) %>% colnames()
+  model <- compute_rda_model(
+    resp, 
+    expl, 
+    vars,
+    partial = TRUE, 
+    partial_covariates = mems_col
+  )
+  
+  selection <- ordistep(
+  model,
+  direction = "both",
+  Pin = 0.05,
+  Pout = 0.1, 
+  trace = FALSE
+  )
+
+  model <- rda(
+    selection$call$formula,
+    expl
+  )
+
+  labels <- RDA.data$label %>% merge(
+    abund_only_genera %>% dplyr::filter(Basin == basin) %>% dplyr::select(id, Date, Season),
+    by = c("id", "Date")
+    )
+  
+  p <- make_triplot(model, labels, basin)
+  
   ggsave(
-      file.path(cca_dir, basin),
+      file.path(rda_dir, basin),
       device = IMAGE_FORNMAT,
       plot = p,
       width = 10,
       height = 10
     )
-  }
+  return(model)
+  }, 
+  simplify = FALSE
 )
 
-abund_only_genera %>% head()
-
-basin <- "NA"
-selected_genera <- all_data[[basin]] %>% rowwise() %>%
-  dplyr::filter(max(c_across(where(is.numeric))) > 0.5) %>%
-  ungroup() %>% pull(Taxon)
+models <- sapply(
+  names(all_data),
+  function(basin) {
+    selected_genera <- pull_taxa(all_data[[basin]], 0.5)
     RDA.data <- create_resp_expl_data(
   env_data = chem_phys,
   sites_taxa = abund_only_genera %>% dplyr::filter(Basin == basin),
+  mems = mems[[basin]],
   covariates = vars,
-  species = setdiff(selected_genera, c("Bacillariophyceae", "Dinoflagellata", "Dinophyceae", "Other phytoplankton")),
+  species = selected_genera,
   log_transform = TRUE, 
   db =  NULL, 
   hellinger = FALSE
 )
-apply(RDA.data$resp, 1, sum)
-RDA.data$resp
-RDA.data$expl
-model <- rda(RDA.data$resp ~ ., data = RDA.data$expl, tidy = TRUE)
+
+  mems_col <- RDA.data$expl %>% dplyr::select(dplyr::contains("MEM")) %>% colnames()
+  model <- compute_rda_model(
+    RDA.data$resp, 
+    RDA.data$expl, 
+    vars,
+    partial = TRUE, 
+    partial_covariates = mems_col
+  )
+
+  
+}, 
+  simplify = FALSE
+)
 
 
+coef(models[[1]], "sp")
 
 
+selection$call$formula
+
+selection <- ordiR2step(
+  models[[1]],
+  scope = models[[1]]$call$formula,
+  direction = "both",
+  Pin = 0.05,
+)
 
 
-fitted_species <- fitted(model)
+anova.cca(models[[1]], by = "axis")
 
-
+library(adespatial)
+forward.sel()

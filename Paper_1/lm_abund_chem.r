@@ -282,16 +282,14 @@ ggsave(
 )
 
 
-#MEMs addition and Cloasest_coast and SeaDepth, Season
-cleaned_data %>% head()
 
-vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "O_sat", "Closest_coast", "SeaDepth")
+#MEMs addition and Cloasest_coast and SeaDepth using MEM + VIF
+library(car)
 library(vegan)
-data_reduced <- merge(
-            cleaned_data %>% dplyr::filter(New_basin == name), 
-            mems[[name]],
-            by = "id"
-        ) %>% dplyr::mutate(across(where(is.numeric), ~ decostand(., "standardize")))
+vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "O_sat", "Closest_coast")
+cleaned_data <- data_fit %>% dplyr::select(all_of(c("New_basin", vars, "sample_abund", "id"))) %>% 
+    na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
+
 
 mem_models <- sapply(
     names(mems), 
@@ -348,8 +346,7 @@ sapply(
     }, 
     simplify = FALSE
 )
-vif(mem_models[[1]])
-which(vif(mem_models[[1]]) < 10) %>% names()
+
 coefs <- sapply(
     names(selections), 
     function(name) {
@@ -370,8 +367,11 @@ facet_wrap(~Var, scales = "free_y")
 
 
 
-
+#USING LASSO 
 library(glmnet)
+vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "O_sat", "Closest_coast", "DIN_TN")
+cleaned_data <- data_fit %>% dplyr::select(all_of(c("New_basin", vars, "sample_abund", "id"))) %>% 
+    na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
 lasso_models <- 
 sapply(
     names(mem_models), 
@@ -391,7 +391,7 @@ sapply(
             all_of(expls)
             )
             ),
-        y = log10(data_reduced$sample_abund + 1),
+        y = log10(data_reduced$sample_abund),
         alpha = 1,
         nfolds = 40
     )
@@ -401,7 +401,7 @@ sapply(
             all_of(expls)
             )
             ),
-        y = log10(data_reduced$sample_abund + 1),
+        y = log10(data_reduced$sample_abund),
         alpha = 1,
         lambda = model$lambda.min
     )
@@ -412,7 +412,7 @@ sapply(
     simplify = FALSE
 )
 
-coefs <- sapply(
+lasso_coefs <- sapply(
     names(lasso_models), 
     function(name) {
         return(
@@ -425,37 +425,73 @@ coefs <- sapply(
     }, 
     simplify = FALSE
 )
-do.call(rbind, coefs) %>% dplyr::filter(!grepl("MEM", Var)) %>% 
-ggplot() + 
-geom_col(aes(x = Region, y = coef), position = "dodge") +
-facet_wrap(~Var, scales = "free_y")
-
-rda_models <- sapply(
-    names(mems), 
+selections <- 
+sapply(
+    names(lasso_models), 
     function(name) {
-        data <- merge(
+        expls <- lasso_coefs[[name]] %>% dplyr::filter(coef != 0) %>% pull(Var)
+        data_reduced <- merge(
             cleaned_data %>% dplyr::filter(New_basin == name), 
             mems[[name]],
             by = "id"
+        ) %>% dplyr::mutate(across(all_of(expls), ~ decostand(., "standardize")))
+    return(
+        lm(
+            paste(
+            "log10(sample_abund) ~", 
+            paste(
+                expls, 
+                collapse = " + "
+                )
+                ), data = data_reduced)
+    )
+    }, 
+    simplify = FALSE
+)
+lm_coefs <- sapply(
+    names(selections), 
+    function(name) {
+        return(
+            summary(selections[[name]])$coefficients[-1, c(1,4)] %>% 
+            as.data.frame() %>% 
+            rownames_to_column(var = "Var") %>% 
+            rename(p_value = `Pr(>|t|)`) %>% 
+            mutate(Region = name)
         )
-    return(rda(data[, vars] ~ ., data[, colnames(mems[[name]])[-1]], scale = TRUE))
     }, 
     simplify = FALSE
 )
 
-selection <- sapply(
-    rda_models, function(x){
-    return(ordistep(
-        x, 
-        scope = x, 
-        direction = "backward", 
-        pstep = 0.05, 
-        perm.max = 200
-    )
-    )
-}, 
-simplify = FALSE
-)
+do.call(rbind, lm_coefs) %>% dplyr::filter(!grepl("MEM", Var)) %>%
+ggplot() + 
+geom_col(aes(x = Region, y = Estimate, fill = ifelse(p_value < 0.05, "<0.05", ">0.05")), position = "dodge") +
+facet_wrap(~Var)
 
 
+do.call(rbind, lm_coefs) %>% 
+ggplot() + 
+geom_tile(aes(x = Region, y = Var, fill = ifelse(p_value < 0.05, Estimate, NA))) + 
+scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, na.value = "grey50") +
+labs(fill = "Estimate")
 
+
+chem_phys %>% 
+ggplot() + 
+geom_point(aes(x = PO4, y = NO3, col = Region)) + 
+facet_wrap(~Region, scales = "free")
+
+
+phyto_abund %>% dplyr::filter(Class == "Bacillariophyceae") %>%
+group_by(Date, id) %>% summarise(
+    sample_abund = sum(Num_cell_l), 
+    Region = first(Region), 
+    Season = first(Season), 
+    Basin = first(Basin),
+    Closest_coast = first(Closest_coast),
+    SeaDepth = first(SeaDepth)
+) %>% merge(
+    chem_phys, 
+    by = c("Date", "id")
+) %>% ggplot() + 
+geom_point(aes(x = log2(SiO4 + 1), y = log10(sample_abund), col = Region.x)) + 
+geom_smooth(aes(x = log2(SiO4 + 1), y = log10(sample_abund), col = Region.x), method = "lm")
