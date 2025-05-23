@@ -7,11 +7,47 @@ library(glmmTMB)
 library(corrplot)
 library(car)
 library(tibble)
+
 model_val <- function(model) {
     op <- par(mfrow = c(2, 2))
     plot(model)
     return(par(op))   
 }
+
+
+log_trans <- function(x) {
+    eps <- x[x != 0] %>% na.omit() %>% min()
+    return(as.numeric(log10(x + eps)))
+}
+
+boxcox_transform <- function(values) {
+  
+  if (any(is.na(values))) {
+    clean_values <- as.numeric(na.omit(values))
+  } else {
+     clean_values <- as.numeric(values)
+  }
+
+  if (any(is.infinite(clean_values))) {
+    clean_values <- as.numeric(clean_values[is.finite(clean_values)])
+  }
+
+
+  if (min(clean_values) == 0.0) {
+    min_val <- clean_values[clean_values != 0] %>% min()
+    clean_values <- clean_values + min_val * 0.1
+  }
+  lambda <- MASS::boxcox(clean_values ~ 1, plotit = FALSE)
+  max_lambda <- lambda$x[which(lambda$y == max(lambda$y))]
+  if (max_lambda == 0) {
+    clean_values <- log(clean_values)
+  } else {
+    clean_values <- (clean_values^max_lambda - 1) / max_lambda
+  }
+  values[which(!(is.na(values) | is.infinite(values)))] <- clean_values
+  return(values)
+}
+
 
 from_region_to_abreviation <- c(
     "Friuli-Venezia-Giulia" = "FVG",
@@ -53,7 +89,9 @@ phyto_abund <- read.csv("./phyto_abund.csv") %>% dplyr::filter(!(id == "VAD120" 
 chem_phys <- read.csv("./df_chem_phys.csv")
 chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
 chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))
-sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(sample_abund = as.integer(sum(Num_cell_l)), Region = first(Region), Season = first(Season), Basin = first(Basin)) 
+
+
+sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(sample_abund = as.integer(sum(Num_cell_l)), Region = first(Region), Season = first(Season), Basin = first(Basin), Closest_coast = first(Closest_coast)) 
 sample_abund <- sample_abund %>% mutate(
     New_basin = case_when(
         Region %in% c("FVG", "VEN", "EMR") ~ "NA",
@@ -75,200 +113,117 @@ sample_abund <- sample_abund %>% mutate(
 )
 
 
-log_trans <- function(x) {
-    eps <- x[x != 0] %>% na.omit() %>% min()
-    return(as.numeric(log10(x + eps)))
-}
-boxcox_transform <- function(values) {
-  
-  if (any(is.na(values))) {
-    clean_values <- as.numeric(na.omit(values))
-  } else {
-     clean_values <- as.numeric(values)
-  }
-  if (min(clean_values) == 0.0) {
-    min_val <- clean_values[clean_values != 0] %>% min()
-    clean_values <- clean_values + min_val * 0.1
-  }
+chem_phys <- chem_phys %>% mutate(NO_rat = NO2 / NO3, 
+                    DIN_TN = (NH4 + NO3) / TN,
+                    P_rat = PO4 / TP, 
+                    N_star = NO3 - 16 * PO4
+)
 
-  lambda <- MASS::boxcox(clean_values ~ 1, plotit = FALSE)
-  max_lambda <- lambda$x[which(lambda$y == max(lambda$y))]
-  if (max_lambda == 0) {
-    clean_values <- log(clean_values)
-  } else {
-    clean_values <- (clean_values^max_lambda - 1) / max_lambda
-  }
-  values[which(!is.na(values))] <- clean_values
-  return(values)
-}
 
-vars <- c("DO", "NH4", "NO3", "PO4", "SiO4", "Salinity", "TN", "TP", "T", "pH")
-vars_to_transform <- c("NH4", "NO3", "pH", "PO4", "Salinity", "SiO4", "TN", "TP", "T")
-chem_phys %>% dplyr::select(-c(Secchi_depth, id, Date, E_cond, Chla, NO2, O_sat)) %>% 
-mutate(across(all_of(vars_to_transform), boxcox_transform)) %>% 
-pivot_longer(cols = -Region, names_to = "var", values_to = "value") %>% 
-ggplot() +
-geom_histogram(aes(x = value))  + facet_wrap(~ var, scale = "free") + theme_minimal() + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + labs(x = "Variable", y = "Value")
+png("./chem_phys.png", width = 800, height = 800)
+chem_phys %>% dplyr::select(DO, O_sat, NH4, NO3, TN, PO4, TP, SiO4, Salinity, pH, NO_rat, DIN_TN, P_rat, N_star) %>% 
+pairs()
+dev.off()
 
+
+
+summary(lm(chem_phys$O_sat ~ chem_phys$DO))
+vars_to_transform <- c("Chla", "NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "DIN_TN", "pH", "O_sat", "P_rat")
 data_fit <-merge(
-    chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla, O_sat))  %>% 
-    dplyr::filter(pH > 7, PO4 < 2, TN / TP < 120) %>% 
+    chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, NO_rat))  %>% 
+    dplyr::filter(pH > 7) %>% 
     mutate(across(all_of(vars_to_transform), boxcox_transform)), 
     sample_abund, how = "inner", by = c("Date", "id")
-    ) %>% dplyr::select(-c(Date, id))
-    
+    )  %>% 
+    dplyr::filter(Region != "BAS")
 
 
+vars <- c("T", "O_sat", "TP", "P_rat", "Salinity", "Closest_coast", "N_star") #"NO3", "PO4", "DO"
+cleaned_data <- data_fit %>% 
+    na.omit() %>% 
+    dplyr::select(all_of(c("Region", "Season", "New_basin", vars, "sample_abund"))) %>% 
+    dplyr::filter(if_all(where(is.numeric), ~ is.finite(.))) %>% 
+    dplyr::mutate_at(all_of(vars), ~ (scale(.) %>% as.vector())) 
+  
+cleaned_data$Region <- factor(cleaned_data$Region, levels = unname(from_region_to_abreviation))
+cleaned_data$Season <- factor(cleaned_data$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
+cleaned_data$New_basin <- factor(cleaned_data$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"))
 
-
-
-
-abund_only_genera <- phyto_abund %>% mutate(
-    Det_level = case_when(
-        Class == "nan" ~ Taxon,
-        Genus == "" ~ Class,
-        TRUE ~ Genus
-    )
-) %>% group_by(Date, id, Det_level) %>% 
-summarize(
-    Abund = sum(Num_cell_l), 
-    basin = first(New_basin),
-    Season = first(Season),
-    .groups = "drop"
-) %>% pivot_wider(names_from = Det_level, values_from = Abund, values_fill = 0)
-
-
-
-
-merge(
-    sapply(
-    names(estimates),
-    function(name) {
-    return(
-estimates[[name]][1, ])
-}
-) %>% as.data.frame() %>% rownames_to_column(var = "Region") %>% pivot_longer(cols = -Region, names_to = "Var", values_to = "Estimate"), 
-sapply(
-    names(estimates),
-    function(name) {
-    return(
-estimates[[name]][2, ])
-}
-) %>% as.data.frame() %>% rownames_to_column(var = "Region") %>% pivot_longer(cols = -Region, names_to = "Var", values_to = "p_value"), 
-by = c("Region", "Var")
-) %>% ggplot() + 
-geom_col(aes(x = Region, y = Estimate, fill = ifelse(p_value < 0.05, "blue", "red")), position = "dodge") + 
-facet_wrap(~Var, scales = "free") + 
-scale_fill_manual(values = c("blue", "red"))
-
-
-
-
-
-
-season <- "Winter"
-correlation <- chem_phys %>% dplyr::select(-c(Region, id, Date, E_cond)) %>% 
-mutate(across(all_of(vars), log_trans)) %>% na.omit() %>% cor()
-
-
-corrplot.mixed(correlation, order = 'AOE')
-
-
-
-lm_statistic <- function(data, var, spat_col = "Region") {
-    region <- data[[spat_col]][1]
-    season <- data$Season[1]
-    data_cleaned <- data %>% dplyr::select(sample_abund, !!sym(var)) %>% na.omit()
-    info <- c(Var = var, Region = region, Season = season)
-    if (nrow(data_cleaned) < 7) {
-        return(
-            data.frame(
-                Var = var, Region = region, Season = season,
-                Estimate = NA, `Pr(>|t|)` = NA
-            )
-        )
-    }
-    model <- lm(formula(paste("log10(sample_abund) ~", var)), data = data_cleaned)
-    return(
-        data.frame(
-            Var = var, Region = region, Season = season,
-            summary(model)$coefficients[2, c(1,4)] %>% as.list()
-        )
-    )
-}
-
-variables <- c("DO", "NH4", "NO3","PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T")
-model <- lm(formula(paste("log10(sample_abund) ~", paste(variables, collapse = "+"))), data = data_fit %>% na.omit())
-summary(model)
-car::vif(model)
-summary(model)$coefficients[2, c(1,4)] %>% as.list()
-
-paste("log10(sample_abund) ~", vars, collapse = "+")
-
-
-
-statistics <- bind_rows(
-    lapply(variables, function(x) {lapply(data_fit %>% group_split(Season, Region), function(y) lm_statistic(y, x)) %>% bind_rows()}) 
-    )# %>% na.omit()
-statistics$Region <- factor(statistics$Region, levels = unname(from_region_to_abreviation))
-statistics$Season <- factor(statistics$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
-
-
-
-statistics %>% mutate(Estimate = case_when(
-    Pr...t.. > 0.05 ~ NA,
-    TRUE ~ Estimate
-)) %>% 
-ggplot(aes(x = Season, y = Region, fill = Estimate)) +
-facet_wrap(~Var, scales = "free") +
-geom_tile() + labs(x = "Season", y = "Region", fill = "Estimate") + 
-scale_fill_gradient2(low = "blue", high = "red", limits = c(-1, 1))
-
-statistics <- bind_rows(
-    lapply(variables, function(x) {lapply(data_fit %>% group_split(Season, Basin), function(y) lm_statistic(y, x, spat_col = "Basin")) %>% bind_rows()}) 
-    )
-statistics$Region <- factor(statistics$Region, levels = c("NorthAdr", "SouthAdr", "Ion", "SouthTyr", "NorthTyr", "WestMed"))
-statistics$Season <- factor(statistics$Season, levels = c("Winter", "Spring", "Summer", "Autumn"))
-
-statistics %>% mutate(Estimate = case_when(
-    Pr...t.. > 0.05 ~ NA,
-    TRUE ~ Estimate
-)) %>% 
-ggplot(aes(x = Season, y = Region, fill = Estimate)) +
-facet_wrap(~Var, scales = "free") +
-geom_tile() + labs(x = "Season", y = "Region", fill = "Estimate") + 
-scale_fill_gradient2(low = "blue", high = "red", limits = c(-1, 1))
-
-lm(formula(paste("log10(sample_abund) ~", ".")), data = data_fit %>% dplyr::filter(Basin == "NorthAdr", Season == "Summer") %>% dplyr::select(sample_abund, all_of(variables))) %>% summary()
-
-data_fit %>% mutate(N_P = TN / TP) %>% dplyr::filter(N_P < 120) %>% dplyr::filter(!Region %in% c("EMR", "FVG", "VEN")) %>% ggplot() + 
-geom_point(aes(y = log10(sample_abund), x = N_P, color = Region)) + theme_minimal() 
-data_fit %>% mutate(N_P = TN / TP) %>% dplyr::filter(N_P < 120) %>% dplyr::filter(Region %in% c("EMR", "FVG", "VEN")) %>% ggplot() + 
-geom_point(aes(y = log10(sample_abund), x = N_P, color = Region)) + theme_minimal()#+ labs(x = "TN", y = "TP")
-data_fit %>% dim()
-data_fit <-merge(chem_phys %>% dplyr::select(c(Date, id, -Region, Chla, Salinity, TP, TN)) %>% na.omit(), sample_abund, how = "inner", by = c("Date", "id")) #%>% dplyr::filter(TN / TP < 120)
 
 ## Testing lmer4 ##
-model_lmer <- lme4::glmer(sample_abund ~Salinity + (1 | Region) + (1| Season), data = data_fit, family = negative.binomial(theta = 1))
-summary(model_lmer)
-make_prediction_df <- function(data, model) {
-    predicted <- data.frame(
-        Region = data$Region,
-        Season = data$Season,
-        predicted = predict(model, newdata = data, type = "response"), 
-        residuals = residuals(model, type = "pearson")
-    )
-    return(predicted)
-}
-predicted <- make_prediction_df(data_fit, model_lmer)
-predicted %>% ggplot() + 
-geom_point(aes(x = log10(predicted+1), y = log10(residuals+1), fill = Region), colour = "black", pch = 21, size = 3, alpha = 0.8)
-predicted %>% ggplot() + 
-geom_boxplot(aes(x = Region, y = log10(residuals+1), group = Region))
-model_val(model_lmer)
-plot(model_lmer)
+### Probably Regional effect, can be estimated with a mixed term 
+### Season need not be included in the model
+### It is better to use full fixed model (AIC)
 
-drop1(model_lmer)
+model_fixed <- lm(
+    paste("log10(sample_abund) ~ ",  paste(vars, collapse = " + "), "+ Region"), 
+    data = cleaned_data
+    )    
+summary(model_fixed)
+car::vif(model_fixed)
+step(model_fixed)
+
+model_fixed <- lm(
+    paste("log10(sample_abund) ~  Region + T + O_sat + TP + P_rat + Salinity + Closest_coast + N_star"), 
+    data = cleaned_data
+    )
+summary(model_fixed)
+
+cleaned_data %>% dplyr::select(P_rat, N_star) %>% cor()
+cleaned_data %>%
+ggplot() + 
+geom_point(aes(y = log10(sample_abund), x = DO, col = Region)) + 
+geom_smooth(aes(y = log10(sample_abund), x = DO), method = "lm") +
+facet_wrap(~New_basin)
+
+
+evaluation <- data.frame(
+    fitted = fitted(model_fixed), 
+    residuals = resid(model_fixed)
+) %>% cbind(cleaned_data)
+
+evaluation %>% 
+ggplot() + 
+geom_point(aes(Season, residuals))
+
+evaluation %>% pivot_longer(
+    cols = -c(Region, Season, New_basin, sample_abund, fitted, residuals), 
+    names_to = "var",
+    values_to = "value"
+) %>% ggplot() + 
+    geom_point(aes(x = value, y = log10(sample_abund), color = Region)) + 
+    geom_smooth(aes(x = value, y = log10(sample_abund)), method = "lm") +
+    facet_wrap(~var, scales = "free")
+
+summary(model_fixed)$coefficients
+
+
+
+
+##GLM ##
+m1 <- glmmTMB(
+    sample_abund ~ (1 | Region) + Closest_coast + T , 
+    data = cleaned_data, 
+    family = nbinom2
+)
+summary(m1)
+sigma(m1)
+qqnorm(resid(m1, type = "pearson"))
+qqline(resid(m1, type = "pearson"))
+
+resid(m1) %>% min()
+data.frame(
+    res = resid(m1, type = "pearson"), 
+    fitted = fitted(m1)
+) %>% cbind(cleaned_data)  %>% 
+ggplot() +
+geom_boxplot(aes(x = Region, y = res, group = Region)) +
+#geom_point(aes(x = log10(fitted), y = res, col = Region)) +
+scale_y_continuous(trans = scales::pseudo_log_trans(base = 10))
+stat_ellipse(aes(x = DO, y = fitted, col = Basin))
+geom_smooth(aes(x = DO, y = res, col = Basin), method = "lm") 
+
+
 #NB model ##
 model_nb <-  MASS::glm.nb(sample_abund ~ Region + Season, data = sample_abund[-c(1554, 966, 1348),])
 model_mixed_nb <- MASS::glmmPQL(sample_abund ~ Region, random = ~ 1 | Season, data = sample_abund, family = negative.binomial(theta = 1))
@@ -393,9 +348,55 @@ p <- data %>% dplyr::filter(TN / TP < 120) %>% ggplot(aes(x = Region, y = TN / T
         y = "Abundance [cells/L]",
         title = "Sample abundance per basin and season"
     ) 
-p
-
-vars <- c("Salinity", "TN", "TP")
-fit.data <-  merge(chem_phys %>% dplyr::select(Date, id, all_of(vars)) %>% na.omit(), sample_abund, how = "inner", by = c("Date", "id"))
 
 
+
+library(vegan)
+
+
+pca_NA <- rda(
+    chem_phys %>% 
+    dplyr::filter(Region %in% c("FVG", "VEN", "EMR")) %>%
+    dplyr::select(DO, NH4, NO3, O_sat, PO4, Salinity, SiO4, T, TN, TP, pH) %>% mutate(across(where(is.numeric), ~ decostand(., "standardize"))) %>% na.omit(), 
+    tidy = TRUE
+    )
+summary(pca_NA)
+sites <- cbind(
+    scores(pca_NA, display = "sites"), 
+    chem_phys %>% 
+    dplyr::filter(Region %in% c("FVG", "VEN", "EMR")) %>%
+    dplyr::select(Region, DO, NH4, NO3, O_sat, PO4, Salinity, SiO4, T, TN, TP, pH) %>% mutate(across(where(is.numeric), ~ decostand(., "standardize"))) %>% na.omit()
+    )
+env_arrows <- scores(pca_NA, display = "species")
+
+sites %>% 
+ggplot() + 
+geom_point(data = sites, aes(x = PC1, y = PC2, col = Region)) +
+geom_segment(data = env_arrows, aes(x = 0, y = 0, xend = PC1, yend = PC2), arrow = arrow(length = unit(0.2, "cm")), col = "black") + 
+geom_text(data = env_arrows, aes(x = PC1, y = PC2, label = rownames(env_arrows)), size = 3, hjust = 0.5, vjust = 0.5)
+
+pca_not_NA <- rda(
+    chem_phys %>% 
+    dplyr::filter(!Region %in% c("FVG", "VEN", "EMR", "CAM")) %>%
+    dplyr::select(DO, NH4, NO3, O_sat, PO4, Salinity, SiO4, T, TN, TP, pH) %>% mutate(across(where(is.numeric), ~ decostand(., "standardize"))) %>% na.omit()
+    )
+summary(pca_not_NA)
+sites <- cbind(
+    scores(pca_not_NA, display = "sites"), 
+    chem_phys %>% 
+    dplyr::filter(!Region %in% c("FVG", "VEN", "EMR", "CAM")) %>%
+    dplyr::select(Region, DO, NH4, NO3, O_sat, PO4, Salinity, SiO4, T, TN, TP, pH) %>% mutate(across(where(is.numeric), ~ decostand(., "standardize"))) %>% na.omit()
+    )
+env_arrows <- scores(pca_not_NA, display = "species")
+sites %>% 
+ggplot() + 
+geom_point(data = sites, aes(x = PC1, y = PC2, col = Region)) +
+geom_segment(data = env_arrows, aes(x = 0, y = 0, xend = PC1, yend = PC2), arrow = arrow(length = unit(0.2, "cm")), col = "black") + 
+geom_text(data = env_arrows, aes(x = PC1, y = PC2, label = rownames(env_arrows)), size = 3, hjust = 0.5, vjust = 0.5)
+
+
+chem_phys %>% dplyr::select(-c(E_cond, Secchi_depth, NO2, DIN_TN, NO_rat, P_rat)) %>% 
+pivot_longer(cols = -c(Date, id, Region), names_to = "var", values_to = "value") %>% 
+ggplot() + 
+geom_boxplot(aes(x = Region, y = value)) + 
+facet_wrap(~var, scales = "free") 

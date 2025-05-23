@@ -76,18 +76,85 @@ vars_to_transform <- c("NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "DIN_
 
 chem_phys <- read.csv("./df_chem_phys.csv") %>% 
 dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla)) %>%
-dplyr::filter(pH > 7, PO4 < 2, TN / TP < 120) %>% 
+dplyr::filter(
+  DO < 400, 
+  NH4 < 10,
+  NO3 < 57, 
+  O_sat < 160, 
+  pH > 7, 
+  PO4 < 2, 
+  Salinity > 20, 
+  SiO4 < 40, 
+  TN < 120
+  ) %>% 
 mutate(
   DIN_TN = (NH4 + NO3) / TN,
-  P_rat = PO4 / TP
+  P_rat = PO4 / TP, 
+  N_star = NO3 - 16 * PO4
   ) %>% 
 mutate(across(all_of(vars_to_transform), boxcox_transform)) %>% 
 na.omit() %>% 
-dplyr::filter(if_all(where(is.numeric), ~ is.finite(.))) %>% merge(
-  phyto_abund %>% dplyr::distinct(id, Closest_coast, SeaDepth), 
-  by = "id"
+dplyr::filter(if_all(where(is.numeric), ~ is.finite(.))) %>% 
+merge(
+  phyto_abund %>% dplyr::distinct(id, Date, Closest_coast, SeaDepth, Season, New_basin), 
+  by = c("Date", "id")
 )
 
+##Check env per basin, 
+pca_basins <- sapply(
+  chem_phys %>% pull(New_basin) %>% unique(),
+  function(basin) {
+    data <- chem_phys %>% 
+    dplyr::select(-c(id, Date, P_rat, Closest_coast, SeaDepth, Season)) %>%
+    dplyr::filter(New_basin == basin) %>% na.omit() %>% 
+    dplyr::select(-New_basin)
+    
+    return(
+      rda(
+        data %>% mutate(across(everything(), ~ decostand(., "standardize"))),
+        tidy = TRUE
+      )
+    )
+  }, 
+  simplify = FALSE
+)
+names(pca_basins) <- chem_phys %>% pull(New_basin) %>% unique()
+
+dir.create("./pca_env", showWarnings = FALSE)
+plot_dir <- file.path(HOME_, "pca_env")
+sapply(
+  names(pca_basins),
+  function(basin) {
+    pca <- pca_basins[[basin]]
+    sites <- cbind(
+      scores(pca, display = "sites"), 
+      chem_phys %>% dplyr::filter(New_basin == basin) %>% dplyr::select(id, Date, Season)
+    )
+    env_arrows <- scores(pca, display = "species")
+    perc <- round(100*(summary(pca)$cont$importance[2, 1:2]), 2)
+    
+    p <- sites %>% ggplot() + 
+      geom_point(aes(x = PC1, y = PC2, col = Season)) + 
+      geom_segment(data = env_arrows, aes(x = 0, y = 0, xend = PC1, yend = PC2), 
+                   arrow = arrow(length = unit(0.2, "cm")), col = "blue") +
+      geom_text(data = env_arrows, aes(x = PC1, y = PC2, label = rownames(env_arrows)),
+                size = 3, hjust = 0.5, vjust = 0.5) +
+      labs(title = paste("RDA for", basin), x = paste("PC1 (",perc[1], "%)", sep="") , y=paste("PC2 (",perc[2], "%)", sep="")) + 
+      theme_bw() + 
+      theme(legend.position="bottom")
+    
+    ggsave(
+      file.path(plot_dir, paste(basin, "pca_env", sep = "_")),
+      device = IMAGE_FORNMAT,
+      plot = p,
+      width = 10,
+      height = 10
+    )
+  }, 
+  simplify=FALSE
+)
+
+chem_phys %>% head()
 
 
 

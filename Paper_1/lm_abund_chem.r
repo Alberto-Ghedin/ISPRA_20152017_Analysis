@@ -140,14 +140,26 @@ ylim(c(0,20))
 
 chem_phys <- chem_phys %>% mutate(NO_rat = NO2 / NO3, 
                     DIN_TN = (NH4 + NO3) / TN,
-                    P_rat = PO4 / TP
+                    P_rat = PO4 / TP, 
+                    N_star = NO3 - 16 * PO4
 )
 chem_phys %>% dplyr::select(-c(Region, id, Date, E_cond)) %>% apply(2, function(x) shapiro.test(x[is.finite(x)])$statistic)
 
-vars_to_transform <- c("Chla", "NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "DIN_TN", "pH", "O_sat")
+
+vars_to_transform <- c("Chla", "NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "DIN_TN", "pH") #O_sat
 data_fit <-merge(
-    chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, NO_rat, P_rat))  %>% 
-    dplyr::filter(pH > 7, PO4 < 2, TN / TP < 120) %>% 
+    chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, NO_rat, P_rat, O_sat))  %>% 
+    dplyr::filter(
+  DO < 400, 
+  NH4 < 10,
+  NO3 < 57, 
+  #O_sat < 160, 
+  pH > 7, 
+  PO4 < 2, 
+  Salinity > 20, 
+  SiO4 < 40, 
+  TN < 120
+  ) %>% 
     mutate(across(all_of(vars_to_transform), boxcox_transform)), 
     sample_abund, how = "inner", by = c("Date", "id")
     )
@@ -155,6 +167,7 @@ data_fit <-merge(
 
 cleaned_data <- data_fit %>% 
     na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
+
 
 
 regression_plot_region(data_fit, "Chla")
@@ -192,17 +205,22 @@ fit_reg_basin <- function(group, group_col, vars) {
         )
     }
 
-data_fit %>% head()
-res <- fit_reg_basin("NA", "New_basin", c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "P_rat"))
-res
+
+cleaned_data %>% colnames()
+cleaned_data <- cleaned_data %>% mutate(NA_div = 
+case_when(
+    New_basin == "NA" ~ "NA",
+    New_basin != "NA" ~ "ELSE",
+    ))
+
 
 estimates <- sapply(
-    data_fit %>% pull(New_basin) %>% unique(),
+    cleaned_data %>% pull(NA_div) %>% unique(),
     function(basin) {
         fit_reg_basin(
             group = basin, 
-            group_col = "New_basin", 
-            vars = c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "P_rat")
+            group_col = "NA_div", 
+            vars = c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "O_sat", "Closest_coast")
         )
         },
     simplify = FALSE
@@ -221,7 +239,7 @@ geom_col(aes(x = Region, y = Estimate, fill = ifelse(p_value < 0.05, "<0.05", ">
 facet_wrap(~Var, scales = "free") + 
 scale_fill_manual(values = c("blue", "red")) + 
 labs(fill = "Significance")
-
+p
 
 ggsave(
     filename = "lm_abund_chem_basins",
@@ -281,15 +299,54 @@ ggsave(
     dpi = 300
 )
 
+#Using region, no MEM 
+library(car)
+vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "Closest_coast")
+cleaned_data <- data_fit %>% dplyr::select(all_of(c("New_basin", vars, "sample_abund", "id"))) %>% 
+    na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
 
 
 #MEMs addition and Cloasest_coast and SeaDepth using MEM + VIF
 library(car)
 library(vegan)
 vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "O_sat", "Closest_coast")
-cleaned_data <- data_fit %>% dplyr::select(all_of(c("New_basin", vars, "sample_abund", "id"))) %>% 
+cleaned_data <- data_fit %>% dplyr::select(all_of(c("Region", "New_basin", vars, "sample_abund", "id"))) %>% 
     na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
 
+
+full_models <- sapply(
+    cleaned_data %>% pull(New_basin) %>% unique(), 
+    function(name) {
+        data_reduced <- cleaned_data %>% 
+        dplyr::filter(New_basin == name) %>% 
+        dplyr::mutate(across(all_of(vars), ~ decostand(., "standardize")))
+        model <- lm(
+            paste(
+                "log10(sample_abund) ~", 
+                paste(
+                    c("id", 
+                    vars
+                    ),
+                    collapse = " + "
+                )
+            ), 
+            data = data_reduced
+        )
+        }, 
+    simplify = FALSE
+)
+data_reduced
+selections <- sapply(
+    names(full_models), 
+    function(name) {
+        data_reduced <- cleaned_data %>% 
+        dplyr::filter(New_basin == name) %>% 
+        dplyr::mutate(across(all_of(vars), ~ decostand(., "standardize")))
+        new_model <- step(full_models[[name]])
+    }
+)
+
+selections[[1]]
 
 mem_models <- sapply(
     names(mems), 
@@ -490,8 +547,161 @@ group_by(Date, id) %>% summarise(
     Closest_coast = first(Closest_coast),
     SeaDepth = first(SeaDepth)
 ) %>% merge(
-    chem_phys, 
+    cleaned_data %>% dplyr::select(Date, id, SiO4),
     by = c("Date", "id")
 ) %>% ggplot() + 
-geom_point(aes(x = log2(SiO4 + 1), y = log10(sample_abund), col = Region.x)) + 
-geom_smooth(aes(x = log2(SiO4 + 1), y = log10(sample_abund), col = Region.x), method = "lm")
+geom_point(aes(x =SiO4, y = log10(sample_abund), col = Region))# + 
+geom_smooth(aes(x = log2(SiO4 + 1), y = log10(sample_abund), col = Region), method = "lm")
+
+chem_phys %>% head()
+chem_phys %>% 
+ggplot() + 
+geom_histogram(aes(x = PO4 / TP))
+quantile(chem_phys %>% mutate(P_rat = PO4 / TP) %>% pull(P_rat),probs = seq(0, 1, 0.25), na.rm = TRUE)
+#TRIX index 
+chem_phys %>% mutate(
+    chla_gm3 = Chla * 0.8935, 
+    DIN_gm3 = NO3 * 0.062 +  NH4 * 0.018,
+    TP_gm3 = TP * 0.031,
+    O_dev = abs(O_sat - 100),
+) %>% 
+mutate(
+    TRIX = 10 / 4 * (
+        (log10(chla_gm3) - log10(min(chla_gm3, na.rm = TRUE))) / (log10(max(chla_gm3, na.rm = TRUE)) - log10(min(chla_gm3, na.rm = TRUE))) +
+        (log10(DIN_gm3) - log10(min(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE))) / (log10(max(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE)) - log10(min(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE))) +
+        (log10(TP_gm3) - log10(min(TP_gm3[TP_gm3 != 0], na.rm = TRUE))) / (log10(max(TP_gm3[TP_gm3 != 0], na.rm = TRUE)) - log10(min(TP_gm3[TP_gm3 != 0], na.rm = TRUE))) + 
+        (log10(O_dev) - log10(min(O_dev[O_dev != 0], na.rm = TRUE))) / (log10(max(O_dev, na.rm = TRUE)) - log10(min(O_dev[O_dev != 0], na.rm = TRUE)))
+    )
+) %>% merge(
+    sample_abund, 
+    by = c("Date", "id")
+) %>% ggplot() + 
+geom_point(aes(x = TRIX, y = log10(sample_abund), col = New_basin)) + 
+geom_smooth(aes(x = TRIX, y = log10(sample_abund), col = New_basin), method = "lm") #+ 
+facet_wrap(~New_basin)
+
+sample_abund %>% colnames()
+
+chem_phys %>% mutate(
+    chla_gm3 = Chla * 0.8935, 
+    NO3_gm3 = NO3 * 0.062,
+    NH4_gm3 = NH4 * 0.018,
+    TP_gm3 = TP * 0.031,
+) %>% pull(chla_gm3) %>% quantile(., probs = seq(0, 1, 0.25), na.rm = TRUE)
+
+
+chem_phys %>% mutate(
+    chla_gm3 = Chla * 0.8935, 
+    DIN_gm3 = NO3 * 0.062 +  NH4 * 0.018,
+    TP_gm3 = TP * 0.031,
+    O_dev = abs(O_sat - 100),
+) %>% 
+mutate(
+      a =   (log10(chla_gm3) - log10(min(chla_gm3, na.rm = TRUE))) / (log10(max(chla_gm3, na.rm = TRUE)) - log10(min(chla_gm3, na.rm = TRUE))), 
+      b =   (log10(DIN_gm3) - log10(min(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE))) / (log10(max(DIN_gm3, na.rm = TRUE)) - log10(min(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE))),
+      c =   (log10(TP_gm3) - log10(min(TP_gm3[TP_gm3 != 0], na.rm = TRUE))) / (log10(max(TP_gm3, na.rm = TRUE)) - log10(min(TP_gm3[TP_gm3 != 0], na.rm = TRUE))), 
+      d =   (log10(O_dev) - log10(min(O_dev[O_dev != 0], na.rm = TRUE))) / (log10(max(O_dev, na.rm = TRUE)) - log10(min(O_dev[O_dev != 0], na.rm = TRUE)))
+    )%>% pull(d)
+
+
+chem_phys %>% mutate(
+    chla_gm3 = Chla * 0.8935, 
+    DIN_gm3 = NO3 * 0.062 +  NH4 * 0.018,
+    TP_gm3 = TP * 0.031,
+    O_dev = abs(O_sat - 100),
+) %>% 
+mutate(
+    a = log10(DIN_gm3), 
+    b  = log10(min(DIN_gm3, na.rm = TRUE)),
+    c = log10(max(DIN_gm3, na.rm = TRUE))
+) %>% head()
+
+sum(chem_phys %>% pull(O_sat) == 0, na.rm = TRUE)
+
+
+chem_phys %>% mutate(
+    chla_gm3 = Chla * 0.8935, 
+    DIN_gm3 = NO3 * 0.062 +  NH4 * 0.018,
+    TP_gm3 = TP * 0.031,
+    O_dev = abs(O_sat - 100),
+) %>% 
+mutate(
+    TRIX = 10 / 4 * (
+        (log10(chla_gm3) - log10(min(chla_gm3, na.rm = TRUE))) / (log10(max(chla_gm3, na.rm = TRUE)) - log10(min(chla_gm3, na.rm = TRUE))) +
+        (log10(DIN_gm3) - log10(min(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE))) / (log10(max(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE)) - log10(min(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE))) +
+        (log10(TP_gm3) - log10(min(TP_gm3[TP_gm3 != 0], na.rm = TRUE))) / (log10(max(TP_gm3[TP_gm3 != 0], na.rm = TRUE)) - log10(min(TP_gm3[TP_gm3 != 0], na.rm = TRUE))) + 
+        (log10(O_dev) - log10(min(O_dev[O_dev != 0], na.rm = TRUE))) / (log10(max(O_dev, na.rm = TRUE)) - log10(min(O_dev[O_dev != 0], na.rm = TRUE)))
+    )
+) %>% merge(
+    sample_abund, 
+    by = c("Date", "id")) %>%
+dplyr::filter(is.finite(TRIX) & !is.na(TRIX)) %>%
+group_by(New_basin) %>%
+summarise(
+    model = list(lm(log10(sample_abund) ~ TRIX, data = cur_data()))
+) %>%
+mutate(
+    summary = lapply(model, summary),
+    coefficients = lapply(summary, function(x) x$coefficients)
+) %>% pull(coefficients)
+
+
+cleaned_data %>% colnames()
+#Using all variables
+all_vars <-  c("DO", "NH4", "NO3", "O_sat", "PO4", "Salinity", "SiO4", "T", "TN", "TP", "pH", "DIN_TN", "Closest_coast")
+
+model <- lm(
+            paste("log10(sample_abund) ~", paste(all_vars, collapse = " + ")), 
+            data = cleaned_data #%>% dplyr::filter(Region != "CAM")
+        )
+summary(model)
+data.frame(
+    res = resid(model), 
+    fitted = fitted(model),
+    Basin = cleaned_data %>% pull(New_basin)
+) %>% 
+ggplot() +
+geom_boxplot(aes(x = Basin, y = res, col = Basin)) #+ 
+stat_ellipse(aes(x = fitted, y = res, col = Basin))
+
+
+vars <- c("DO", "NH4", "O_sat", "PO4", "Salinity", "T", "Closest_coast")
+model <- lm(
+            paste("log10(sample_abund) ~", paste(c(vars, "New_basin"), collapse = " + ")), 
+            data = cleaned_data #%>% dplyr::filter(Region != "CAM")
+        )
+summary(model)
+
+data.frame(
+    res = resid(model), 
+    fitted = fitted(model),
+    Basin = cleaned_data %>% pull(New_basin)
+) %>% 
+ggplot() +
+geom_boxplot(aes(x = Basin, y = res, col = Basin))# + 
+stat_ellipse(aes(x = fitted, y = res, col = Basin))
+
+
+data.frame(
+    res = resid(model), 
+    fitted = fitted(model),
+    Basin = cleaned_data %>% pull(New_basin)
+) %>% cbind(cleaned_data %>% dplyr::select(-Basin)) %>%
+ggplot() +
+geom_point(aes(x = DO, y = fitted, col = Basin)) + 
+stat_ellipse(aes(x = DO, y = fitted, col = Basin))
+geom_smooth(aes(x = DO, y = res, col = Basin), method = "lm") 
+
+data.frame(
+    res = resid(model), 
+    fitted = fitted(model),
+    Basin = cleaned_data  %>% dplyr::filter(Region != "CAM") %>% pull(New_basin)
+) %>% cbind(cleaned_data %>% dplyr::filter(Region != "CAM") %>% dplyr::select(-Basin)) %>% 
+ggplot() +
+geom_point(aes(x = Basin, y = fitted, col = Basin))
+
+
+cleaned_data %>% dplyr::filter(New_basin == 'ST')
+
+
+cleaned_data %>% dplyr::filter(Region == 'BAS')
