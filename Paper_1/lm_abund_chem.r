@@ -2,91 +2,9 @@ library(dplyr)
 library(ggplot2)
 library(tidyr)
 library(MASS) 
-library(corrplot)
 library(tibble)
 library(openxlsx)
-
-IMAGE_FORMAT <- "svg"
-from_region_to_abreviation <- c(
-    "Friuli-Venezia-Giulia" = "FVG",
-    "Veneto" = "VEN", 
-    "Emilia-Romagna" = "EMR",
-    "Marche" = "MAR",
-    "Abruzzo" = "ABR",
-    "Molise" = "MOL",
-    "Puglia" = "PUG",
-    "Basilicata" = "BAS",
-    "Calabria" = "CAL",
-    "Sicilia" = "SIC",
-    "Campania" = "CAM", 
-    "Lazio" = "LAZ",
-    "Toscana" = "TOS",
-    "Liguria" = "LIG",
-    "Sardegna" = "SAR"
-)
-HOME_ <- "."
-phyto_abund <- read.csv("./phyto_abund.csv") %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% mutate(
-    New_basin = case_when(
-        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
-        Region %in% c("MAR", "ABR") ~ "CA", 
-        Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
-        Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
-        Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
-        Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
-        Region == "TOS" ~ "NT",
-        Region == "LIG" ~ "LIG",
-        Region == "SAR" ~ "SAR"
-    )
-    )
-chem_phys <- read.csv("./df_chem_phys.csv")
-chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
-chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))
-
-
-
-sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(
-    sample_abund = as.integer(sum(Num_cell_l)), 
-    Region = first(Region), 
-    Season = first(Season), 
-    Basin = first(Basin),
-    Closest_coast = first(Closest_coast),
-    SeaDepth = first(SeaDepth)
-    ) 
-sample_abund <- sample_abund %>% mutate(
-    New_basin = case_when(
-        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
-        Region %in% c("MAR", "ABR") ~ "CA", 
-        Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
-        Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
-        Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
-        Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
-        Region == "TOS" ~ "NT",
-        Region == "LIG" ~ "LIG",
-        Region == "SAR" ~ "SAR"
-    )
-)
-
-#Open file excel by reading all sheets
-sheets <- getSheetNames("./MEMs_per_basin.xlsx")
-mems <- sapply(
-    sheets,
-    function(sheet) {
-    data <- read.xlsx("./MEMs_per_basin.xlsx", sheet = sheet)
-    }, 
-    simplify = FALSE
-    )
+library(rjson)
 
 
 log_trans <- function(x) {
@@ -133,10 +51,188 @@ regression_plot_region <- function(data, var, log_env = FALSE) {
     labs(title = var)
 }
 
-chem_phys %>% dplyr::select(NO2, NH4, NO3) %>% ggplot() + 
-geom_point(aes(x = NO2 + NO3 + NH4, y = NO3 + NH4)) + 
-xlim(c(0,20)) + 
-ylim(c(0,20)) 
+
+IMAGE_FORMAT <- "svg"
+from_region_to_abreviation <- c(
+    "Friuli-Venezia-Giulia" = "FVG",
+    "Veneto" = "VEN", 
+    "Emilia-Romagna" = "EMR",
+    "Marche" = "MAR",
+    "Abruzzo" = "ABR",
+    "Molise" = "MOL",
+    "Puglia" = "PUG",
+    "Basilicata" = "BAS",
+    "Calabria" = "CAL",
+    "Sicilia" = "SIC",
+    "Campania" = "CAM", 
+    "Lazio" = "LAZ",
+    "Toscana" = "TOS",
+    "Liguria" = "LIG",
+    "Sardegna" = "SAR"
+)
+HOME_ <- "."
+phyto_abund <- read.csv("./phyto_abund.csv") %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% mutate(
+    New_basin = case_when(
+        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
+        Region %in% c("MAR", "ABR") ~ "CA", 
+        Region == "MOL" ~ "SA",
+        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
+        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Region == "BAS" ~ "SM",
+        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Region == "SIC" ~ "SIC", 
+        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Region == "CAM" ~ "ST",
+        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
+        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Region == "TOS" ~ "NT",
+        Region == "LIG" ~ "LIG",
+        Region == "SAR" ~ "SAR"
+    )
+    )
+chem_phys <- read.csv("./df_chem_phys.csv")
+chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
+chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))
+
+
+params <- fromJSON(file = file.path(HOME_, "params.json"))
+
+
+sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(
+    sample_abund = as.integer(sum(Num_cell_l)), 
+    Region = first(Region), 
+    Season = first(Season), 
+    Basin = first(Basin),
+    Closest_coast = first(Closest_coast),
+    SeaDepth = first(SeaDepth)
+    ) 
+sample_abund <- sample_abund %>% mutate(
+    New_basin = case_when(
+        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
+        Region %in% c("MAR", "ABR") ~ "CA", 
+        Region == "MOL" ~ "SA",
+        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
+        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Region == "BAS" ~ "SM",
+        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Region == "SIC" ~ "SIC", 
+        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Region == "CAM" ~ "ST",
+        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
+        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Region == "TOS" ~ "NT",
+        Region == "LIG" ~ "LIG",
+        Region == "SAR" ~ "SAR"
+    )
+)
+
+#Open file excel by reading all sheets
+sheets <- getSheetNames("./MEMs_per_basin.xlsx")
+mems <- sapply(
+    sheets,
+    function(sheet) {
+    data <- read.xlsx("./MEMs_per_basin.xlsx", sheet = sheet)
+    }, 
+    simplify = FALSE
+    )
+
+
+one_every_n_item <- function(list, n) {
+    return(
+        list[seq(1, length(list), n)]
+    )
+}
+ordered_latitude <- phyto_abund %>% dplyr::select(id, Latitude) %>% distinct() %>% 
+arrange(id = factor(id, levels = params$ordered_id, ordered = TRUE)) %>% pull(Latitude) %>% round(2)
+ordered_longitude <- phyto_abund %>% dplyr::select(id, Longitude) %>% distinct() %>%
+arrange(id = factor(id, levels = params$ordered_id, ordered = TRUE)) %>% pull(Longitude) %>% round(2)
+colors <- scales::hue_pal()(length(unique(phyto_abund$New_basin)))
+palette <- setNames(colors, sort(as.character(phyto_abund$New_basin %>% unique())))
+colors <- scales::hue_pal()(length(unique(phyto_abund$Region)))
+palette <- setNames(colors, sort(as.character(phyto_abund$Region %>% unique())))
+
+
+station_sufficient_samples <- phyto_abund %>% group_by(id) %>% summarise(
+    n_samples = n_distinct(Date)
+) %>% arrange(desc(n_samples)) %>% dplyr::filter(n_samples >= 10) %>% pull(id)
+
+p <- chem_phys %>% merge(phyto_abund %>% dplyr::select(Date, id, New_basin), by = c("Date", "id")) %>% 
+mutate(index_id = match(id, params$ordered_id)) %>% 
+ggplot(aes(x = index_id, y = log10(Chla))) + 
+geom_boxplot(aes(group = id, fill = Region)) +
+scale_fill_manual(values = palette) + 
+labs(title = "Sample Chla across all stations", y = "Chla [mumol/L] (log scale)") +
+scale_x_continuous(
+    name = "Latitude",
+    breaks =  seq(1, length(params$ordered_id), 3), 
+    labels = one_every_n_item(ordered_latitude, 3),
+    limits = c(-0.01, 162.01), 
+    sec.axis = sec_axis(
+      ~., 
+      name = "Longitude",
+      breaks = seq(1, length(params$ordered_id), 3),
+      labels = one_every_n_item(ordered_longitude, 3)
+    )
+) + 
+ggplot2::theme(
+        axis.text.x.bottom = element_text(angle = 45, hjust = 1, size = 17),
+        axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0, size = 17),
+        axis.text.y = element_text(angle = 0, hjust = 0, size = 17),
+        axis.title.y = element_text(size = 22),
+        axis.title.x = element_text(size = 22),
+        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 18, face = "bold"),
+    ) 
+ggsave(
+    file.path(HOME_, "chla_per_region.svg"), 
+    p, 
+    width = 18, 
+    height = 8.5, 
+    dpi = 300
+)
+
+p <- sample_abund %>% 
+mutate(index_id = match(id, params$ordered_id)) %>% 
+#dplyr::filter(id %in% station_sufficient_samples) %>%
+ggplot(aes(x = index_id, y = log10(sample_abund +1))) + 
+geom_boxplot(aes(group = id, fill = Region)) +
+scale_fill_manual(values = palette) + 
+labs(title = "Sample abundance across all stations", y = "Abundance [cells/L] (log scale)") +
+scale_x_continuous(
+    name = "Latitude",
+    breaks =  seq(1, length(params$ordered_id), 3), 
+    labels = one_every_n_item(ordered_latitude, 3),
+    limits = c(-0.01, 162.01), 
+    sec.axis = sec_axis(
+      ~., 
+      name = "Longitude",
+      breaks = seq(1, length(params$ordered_id), 3),
+      labels = one_every_n_item(ordered_longitude, 3)
+    )
+) + 
+ggplot2::theme(
+        axis.text.x.bottom = element_text(angle = 45, hjust = 1, size = 17),
+        axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0, size = 17),
+        axis.text.y = element_text(angle = 0, hjust = 0, size = 17),
+        axis.title.y = element_text(size = 22),
+        axis.title.x = element_text(size = 22),
+        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 18, face = "bold"),
+    ) 
+ggsave(
+    file.path(HOME_, "abundance_per_region.svg"), 
+    p, 
+    width = 18, 
+    height = 8.5, 
+    dpi = 300
+)
+
+phyto_abund %>% group_by(id) %>% summarise(
+    n_samples = n_distinct(Date), 
+    Region = first(Region)
+) %>% arrange(desc(n_samples)) %>% dplyr::filter(n_samples < 10) 
 
 chem_phys <- chem_phys %>% mutate(NO_rat = NO2 / NO3, 
                     DIN_TN = (NH4 + NO3) / TN,
@@ -170,6 +266,20 @@ cleaned_data <- data_fit %>%
 
 
 
+chem_phys %>% dplyr::filter(Region %in% c("FVG", "VEN", "EMR", "MOL", "PUG", "ABR", "MAR")) %>% 
+dplyr::select(Date, id, Region, Salinity) %>% 
+merge(
+    sample_abund %>% dplyr::select(Date, id, Season),
+    by = c("Date", "id")
+) %>% 
+mutate(year = format(as.Date(Date), "%Y")) %>% 
+ggplot() + 
+geom_boxplot(aes(x = year, y = Salinity, fill = year)) + 
+facet_wrap(~Season, scales = "free")
+
+
+
+
 regression_plot_region(data_fit, "Chla")
 regression_plot_region(data_fit, "DO")
 regression_plot_region(data_fit, "O_sat")
@@ -188,6 +298,16 @@ regression_plot_region(data_fit, "DIN_TN", log_env = FALSE)
 regression_plot_region(data_fit, "P_rat", log_env = FALSE)
 
 
+merge(
+    sample_abund, 
+    chem_phys %>% dplyr::select(Date, id, Chla) %>% mutate(
+        Chla = log10(Chla)
+    ),
+    by = c("Date", "id")
+) %>% ggplot() + 
+geom_point(aes(x = Chla, y = log10(sample_abund))) +
+facet_wrap(~Region, scales = "free") +
+geom_smooth(aes(x = Chla, y = log10(sample_abund)), method = "lm")
 
 fit_reg_basin <- function(group, group_col, vars) {
     if (nrow(cleaned_data) < 3) {
@@ -250,6 +370,7 @@ ggsave(
     units = "in",
     dpi = 300
 )
+
 
 
 estimates <- mapply(

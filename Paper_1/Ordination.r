@@ -402,20 +402,24 @@ models <- sapply(
 )
 
 
-coef(models[[1]], "sp")
-
-
-selection$call$formula
-
-selection <- ordiR2step(
-  models[[1]],
-  scope = models[[1]]$call$formula,
-  direction = "both",
-  Pin = 0.05,
-)
-
-
-anova.cca(models[[1]], by = "axis")
-
-library(adespatial)
-forward.sel()
+do.call(
+  rbind, 
+  sapply(
+    names(models), 
+    function(basin) {
+      scores(models[[basin]], display = "bp") %>%
+      as.data.frame() %>%
+      rownames_to_column(var = "Var") %>%
+      mutate(
+        Basin = basin
+      )
+    }, 
+    simplify = FALSE
+  )
+) %>% pivot_longer(
+  cols = c("RDA1", "RDA2"), 
+  names_to = "Axis", 
+  values_to = "Value"
+) %>% ggplot() + 
+geom_tile(aes(x = Var, y = Basin, fill = Value)) +
+facet_wrap(~Axis, scales = "free")
