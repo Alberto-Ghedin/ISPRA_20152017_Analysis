@@ -298,16 +298,8 @@ regression_plot_region(data_fit, "DIN_TN", log_env = FALSE)
 regression_plot_region(data_fit, "P_rat", log_env = FALSE)
 
 
-merge(
-    sample_abund, 
-    chem_phys %>% dplyr::select(Date, id, Chla) %>% mutate(
-        Chla = log10(Chla)
-    ),
-    by = c("Date", "id")
-) %>% ggplot() + 
-geom_point(aes(x = Chla, y = log10(sample_abund))) +
-facet_wrap(~Region, scales = "free") +
-geom_smooth(aes(x = Chla, y = log10(sample_abund)), method = "lm")
+
+
 
 fit_reg_basin <- function(group, group_col, vars) {
     if (nrow(cleaned_data) < 3) {

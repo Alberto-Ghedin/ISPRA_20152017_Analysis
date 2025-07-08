@@ -56,6 +56,7 @@ make_raref_plot_richness <- function(acc_curve, plot_title, taxon_level = "Taxa"
 
 # Load data
 HOME_ <- "."
+IMAGE_FORMAT <- "pdf"
 
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
 
@@ -182,7 +183,7 @@ acculumated_richness$Region <- factor(acculumated_richness$Region, levels = c("F
 custom_palette <- rep("black", length(unique(acculumated_richness$Region)))
 names(custom_palette) <- unique(acculumated_richness$Region)
 p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Region)) + 
-    geom_bar(stat = "identity", position = position_dodge(), aes(y = qD, fill = Level), colour = "black", size = 1, alpha = 1) +
+    geom_bar(stat = "identity", position = position_dodge(), aes(y = qD, fill = Level), colour = "black", linewidth = 1, alpha = 1) +
     geom_errorbar(aes(ymin = qD.LCL, ymax = qD.UCL, group = Level), width = 0.5, position = position_dodge(width = 1))  +
     theme_bw(base_size = 18) +
     labs(x = "Region", y = "Estimated richness") +
@@ -199,8 +200,14 @@ p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Region)) +
       legend.margin=margin(0,0,0,0),
       legend.box.margin=margin(t = -10)
     )
-plot_title <- "acc_curve_all_regions_genera_species_bar.pdf"
-ggsave(paste(HOME_, plot_title, sep = "/"), p, width = 15, height = 10)
+plot_title <- paste("acc_curve_all_regions_genera_species_bar", IMAGE_FORMAT, sep = ".")
+ggsave(
+  paste(HOME_, plot_title, sep = "/"), 
+  p,
+  device = IMAGE_FORMAT, 
+  width = 15, 
+  height = 10
+  )
 
 
 acc_curve_genera <- read.csv(paste(HOME_, "acc_curve_all_regions_only_common_genera.csv", sep = "/")) %>% rename(Region = Assemblage) 
@@ -342,9 +349,9 @@ coast_length <- data.frame(
 acculumated_richness <- merge(acculumated_richness, coast_length, by = "Region")
 
 
-p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Region)) + 
-    geom_bar(stat = "identity", position = position_dodge(), aes(y = qD / Coast_length, fill = Level), colour = "black", size = 1, alpha = 1) +
-    geom_errorbar(aes(ymin = qD.LCL / Coast_length, ymax = qD.UCL / Coast_length, group = Level), width = 0.5, position = position_dodge(width = 1))  +
+p <- ggplot(acculumated_richness) + 
+  geom_point(aes(x = Coast_length, y = qD, colour = Level, fill = Level), size = 5) + 
+  geom_errorbar(aes(x = Coast_length, ymin = qD.LCL, ymax = qD.UCL, colour = Level), width = 0.5, position = position_dodge(width = 1))  +
     theme_bw(base_size = 18) +
     #scale_color_manual(values = custom_palette) +
     labs(x = "Region", y = "Estimated richness") +
@@ -361,3 +368,57 @@ p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Region)) +
       legend.margin=margin(0,0,0,0),
       legend.box.margin=margin(t = -10)
     )
+ggsave(
+  paste(HOME_, "acc_curve_all_regions_genera_species_bar_per_coast_length.pdf", sep = "/"), 
+  p, 
+  device = "pdf",
+  width = 15, 
+  height = 10
+)
+
+
+acculumated_richness
+
+cat_contribution <- phyto_abund %>% 
+    group_by(Region, Date, id, Det_level) %>% 
+    summarise(Cat_abund = sum(Num_cell_l)) %>%
+    group_by(Region,Det_level) %>%
+    summarise(mean_Abund =mean(Cat_abund)) %>%  group_by(Region, Det_level) %>% 
+    summarise(
+        tot_abund = sum(mean_Abund)
+    ) %>% group_by(Region) %>%
+    mutate(
+        rel_cont = tot_abund / sum(tot_abund)
+    )
+cat_contribution$Det_level <- factor(cat_contribution$Det_level, levels = c("Species", "Genus", "Higher cat.", "Unknown"))
+cat_contribution$Region <- factor(cat_contribution$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
+
+p <- merge(
+  acculumated_richness, 
+  cat_contribution %>% dplyr::select(Region, Det_level, rel_cont) %>% dplyr::filter(Det_level == "Unknown"), 
+  by = "Region"
+) %>% ggplot() + 
+geom_point(aes(x = rel_cont, y = qD, color = Level), size = 5) +
+geom_errorbar(aes(x = rel_cont, ymin = qD.LCL, ymax = qD.UCL, color = Level), width = 0.01)  +
+theme_bw(base_size = 18) +
+labs(y = "Estimated richness", x = "Relative contribution of unknown taxa") +
+ggtitle("Estimated richness of species and genera vs relative contribution of unknown taxa") +
+theme(
+  axis.title.x = element_text(size = 20),
+  axis.title.y = element_text(size = 20),
+  axis.text.x = element_text(size = 15),
+  axis.text.y = element_text(size = 15), 
+  legend.text = element_text(size = 15),
+  plot.title = element_text(hjust = 0.5, face = "bold", size = 25),
+  legend.position = "bottom",
+  legend.title = element_blank(), 
+  legend.margin=margin(0,0,0,0),
+  legend.box.margin=margin(t = -10)
+)
+ggsave(
+  paste(HOME_, "acc_curve_all_regions_genera_species_vs_unknown_contribution.pdf", sep = "/"), 
+  p, 
+  device = "pdf",
+  width = 15, 
+  height = 10
+)
