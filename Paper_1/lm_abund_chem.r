@@ -52,6 +52,71 @@ regression_plot_region <- function(data, var, log_env = FALSE) {
 }
 
 
+compute_TRIX <- function(data) {
+    max_chla <- data %>% pull(Chla) %>% max(na.rm = TRUE) 
+    min_chla <- data %>% pull(Chla) %>% min(na.rm = TRUE)
+    max_din <- data %>% mutate(DIN = NO3 +  NH4 ) %>% pull(DIN) %>% max(na.rm = TRUE)
+    min_din <- data %>% mutate(DIN = NO3 +  NH4 ) %>% pull(DIN)
+    min_din <- min_din[min_din != 0] %>% min(na.rm = TRUE)
+    max_tp <- data %>% pull(TP[TP !=0]) %>% max(na.rm = TRUE) 
+    min_tp <- data %>% pull(TP[TP !=0]) 
+    min_tp <- min_tp[min_tp != 0] %>% min(na.rm = TRUE) 
+    data %>% pull(TP[TP !=0])
+    max_o_dev <- abs(data %>% pull(O_sat) %>% max(na.rm = TRUE) - 100)
+    min_o_dev <- abs(data %>% pull(O_sat)  - 100)
+    min_o_dev <- min_o_dev[min_o_dev != 0] %>% min(na.rm = TRUE)
+ output <- data %>% 
+ mutate(
+    Chla = ifelse(Chla == 0, min_chla, Chla),
+    DIN = ifelse(NO3 + NH4 == 0, min_din, NO3 + NH4),
+    TP = ifelse(TP == 0, min_tp, TP),
+    O_dev = ifelse(abs(O_sat - min_o_dev) == 0, min_o_dev, abs(O_sat - min_o_dev))
+    ) %>% 
+mutate(
+    TRIX = 10 / 4 * (
+        (log10(Chla) - log10(min_chla)) / (log10(max_chla) - log10(min_chla)) +
+        (log10(DIN) - log10(min_din)) / (log10(max_din) - log10(min_din)) +
+        (log10(TP) - log10(min_tp)) / (log10(max_tp) - log10(min_tp)) + 
+        (log10(O_dev) - log10(min_o_dev)) / (log10(max_o_dev) - log10(min_o_dev))
+    )
+    )
+    return(output)
+}
+
+plot_variable_along_coast <- function(data, var, group, title, ylab, ordered_latitude = ordered_latitude, ordered_longitude = ordered_longitude) {
+    colors <- scales::hue_pal()(length(unique(data[[group]])))
+    palette <- setNames(colors, sort(as.character(data[[group]] %>% unique())))
+    p <- data %>% 
+    mutate(index_id = match(id, params$ordered_id)) %>% 
+    ggplot(aes(x = index_id, y = !!as.symbol(var))) + 
+    geom_boxplot(aes(group = id, fill = !!as.symbol(group))) +
+    scale_fill_manual(values = palette) + 
+    labs(title = title, y = ylab) +
+    scale_x_continuous(
+        name = "Latitude",
+        breaks =  seq(1, length(params$ordered_id), 3), 
+        labels = one_every_n_item(ordered_latitude, 3),
+        limits = c(-0.01, 162.01), 
+        sec.axis = sec_axis(
+          ~., 
+          name = "Longitude",
+          breaks = seq(1, length(params$ordered_id), 3),
+          labels = one_every_n_item(ordered_longitude, 3)
+        )
+    ) + 
+    ggplot2::theme(
+            axis.text.x.bottom = element_text(angle = 45, hjust = 1, size = 17),
+            axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0, size = 17),
+            axis.text.y = element_text(angle = 0, hjust = 0, size = 17),
+            axis.title.y = element_text(size = 22),
+            axis.title.x = element_text(size = 22),
+            plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
+            legend.text = element_text(size = 15),
+            legend.title = element_text(size = 18, face = "bold"),
+        ) 
+    return(p)
+} 
+
 IMAGE_FORMAT <- "svg"
 from_region_to_abreviation <- c(
     "Friuli-Venezia-Giulia" = "FVG",
@@ -70,8 +135,8 @@ from_region_to_abreviation <- c(
     "Liguria" = "LIG",
     "Sardegna" = "SAR"
 )
-HOME_ <- "."
-phyto_abund <- read.csv("./phyto_abund.csv") %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% mutate(
+HOME_ <- "./Paper_1"
+phyto_abund <- read.csv(paste(HOME_, "phyto_abund.csv", sep = "/")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% mutate(
     New_basin = case_when(
         Region %in% c("FVG", "VEN", "EMR") ~ "NA",
         Region %in% c("MAR", "ABR") ~ "CA", 
@@ -90,7 +155,7 @@ phyto_abund <- read.csv("./phyto_abund.csv") %>% dplyr::filter(!(id == "VAD120" 
         Region == "SAR" ~ "SAR"
     )
     )
-chem_phys <- read.csv("./df_chem_phys.csv")
+chem_phys <- read.csv(paste(HOME_, "df_chem_phys.csv", sep = "/"))
 chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
 chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))
 
@@ -127,11 +192,11 @@ sample_abund <- sample_abund %>% mutate(
 )
 
 #Open file excel by reading all sheets
-sheets <- getSheetNames("./MEMs_per_basin.xlsx")
+sheets <- getSheetNames(paste(HOME_, "MEMs_per_basin.xlsx", sep = "/"))
 mems <- sapply(
     sheets,
     function(sheet) {
-    data <- read.xlsx("./MEMs_per_basin.xlsx", sheet = sheet)
+    data <- read.xlsx(paste(HOME_, "MEMs_per_basin.xlsx", sep = "/"), sheet = sheet)
     }, 
     simplify = FALSE
     )
@@ -192,73 +257,96 @@ ggsave(
     dpi = 300
 )
 
-p <- sample_abund %>% 
-mutate(index_id = match(id, params$ordered_id)) %>% 
-#dplyr::filter(id %in% station_sufficient_samples) %>%
-ggplot(aes(x = index_id, y = log10(sample_abund +1))) + 
-geom_boxplot(aes(group = id, fill = Region)) +
-scale_fill_manual(values = palette) + 
-labs(title = "Sample abundance across all stations", y = "Abundance [cells/L] (log scale)") +
-scale_x_continuous(
-    name = "Latitude",
-    breaks =  seq(1, length(params$ordered_id), 3), 
-    labels = one_every_n_item(ordered_latitude, 3),
-    limits = c(-0.01, 162.01), 
-    sec.axis = sec_axis(
-      ~., 
-      name = "Longitude",
-      breaks = seq(1, length(params$ordered_id), 3),
-      labels = one_every_n_item(ordered_longitude, 3)
-    )
-) + 
-ggplot2::theme(
-        axis.text.x.bottom = element_text(angle = 45, hjust = 1, size = 17),
-        axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0, size = 17),
-        axis.text.y = element_text(angle = 0, hjust = 0, size = 17),
-        axis.title.y = element_text(size = 22),
-        axis.title.x = element_text(size = 22),
-        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
-        legend.text = element_text(size = 15),
-        legend.title = element_text(size = 18, face = "bold"),
-    ) 
-ggsave(
-    file.path(HOME_, "abundance_per_region.svg"), 
-    p, 
-    width = 18, 
-    height = 8.5, 
-    dpi = 300
-)
+
 
 phyto_abund %>% group_by(id) %>% summarise(
     n_samples = n_distinct(Date), 
     Region = first(Region)
 ) %>% arrange(desc(n_samples)) %>% dplyr::filter(n_samples < 10) 
 
-chem_phys <- chem_phys %>% mutate(NO_rat = NO2 / NO3, 
-                    DIN_TN = (NH4 + NO3) / TN,
-                    P_rat = PO4 / TP, 
-                    N_star = NO3 - 16 * PO4
+chem_phys <- read.csv(paste(HOME_, "df_chem_phys.csv", sep = "/"))
+chem_phys <- compute_TRIX(chem_phys)
+chem_phys <- chem_phys %>% mutate(
+                   #  NO_rat = NO2 / NO3, 
+                   #DIN_TN = (NH4 + NO3) / TN,
+                   # P_rat = PO4 / TP, 
+                    NP = NO3 / PO4, 
+                    NP_tot = TN / TP
 )
-chem_phys %>% dplyr::select(-c(Region, id, Date, E_cond)) %>% apply(2, function(x) shapiro.test(x[is.finite(x)])$statistic)
 
+vars_to_transform <- c("NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "NP_tot", "pH")
 
-vars_to_transform <- c("Chla", "NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "DIN_TN", "pH") #O_sat
-data_fit <-merge(
-    chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, NO_rat, P_rat, O_sat))  %>% 
-    dplyr::filter(
+chem_phys <- chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla)) %>%
+dplyr::filter(
   DO < 400, 
   NH4 < 10,
   NO3 < 57, 
-  #O_sat < 160, 
+  O_sat < 160, 
   pH > 7, 
   PO4 < 2, 
   Salinity > 20, 
   SiO4 < 40, 
-  TN < 120
-  ) %>% 
-    mutate(across(all_of(vars_to_transform), boxcox_transform)), 
-    sample_abund, how = "inner", by = c("Date", "id")
-    )
+  TN < 120, 
+  NP_tot < 204
+  ) #%>% 
+merge(
+  phyto_abund %>% dplyr::distinct(id, Date, Closest_coast, SeaDepth, Season, New_basin), 
+  by = c("Date", "id")
+) 
+
+chem_phys <- chem_phys %>% mutate(across(all_of(vars_to_transform), boxcox_transform)) %>% 
+dplyr::select(-c(O_sat, NP)) %>%
+na.omit() %>% 
+dplyr::filter(if_all(where(is.numeric), ~ is.finite(.))) 
+
+ordered_transect <- c(
+    "SMTS", "SMLG", "VENEZIA", "ROSOLINA", "PORTO_GARIBALDI", "CESENATICO", "RIMINI", "Chienti", "Esino", "GU",
+    "VA", "R14001_B2", "FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO", "PORTO_CESAREO", "PUNTA_RONDINELLA", "SINNI", "Villapiana",
+    "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche", "Isole_Ciclopi", "Plemmirio", "Isola_Correnti", "San_Marco", "Isole_Egadi", "Capo_Gallo","Vibo_marina", 
+    "Cetraro", "Cilento", "Salerno", "Napoli", "Domizio", "m1lt01", "m1lt02",  "m1rm03",  "m1vt04", "Collelungo","Carbonifera",
+    "Donoratico", "Fiume_Morto", "Mesco" , "Portofino"  ,  "Voltri"  , "Quiliano" , 
+    "Olbia", "Arbatax", "Villasimius", "Cagliari", "Oristano", "Alghero", "Porto_Torres"
+
+)
+sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
+
+sample_abund <- merge(
+    sample_abund, 
+    sea_depth %>% dplyr::select(id, SeaDepth, Transect)
+)
+sample_abund$Transect <- factor(sample_abund$Transect, levels = ordered_transect, ordered = TRUE)
+
+ids <- phyto_abund %>% dplyr::filter(Region == "CAL") %>% pull(id) %>% unique()
+chem_phys %>% dplyr::filter(id %in% ids) %>% 
+dplyr::select(-c(O_dev)) %>%
+pivot_longer(
+  cols = c("NH4", "NO3", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "TRIX", "NP_tot", "DO", "DIN"),
+  names_to = "Variable",
+  values_to = "Value"
+) %>% 
+merge(
+    sample_abund %>% dplyr::select(Date, id, Transect)
+) %>% 
+mutate(id = factor(id, levels = params$ordered_id[params$ordered_id %in% ids], ordered = TRUE)) %>%
+ggplot() + 
+geom_boxplot(aes(x = id, y = Value, fill = Transect)) + 
+facet_wrap(~ Variable, scales = "free")
+
+
+chem_phys %>% dplyr::filter(id %in% cam_ids) %>% 
+dplyr::select(all_of(c("id", "Date", "NH4", "NO3", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "TRIX", "NP_tot", "DO", "DIN", "SeaDepth"))) %>% 
+merge(
+    sample_abund %>% dplyr::select(Date, id, sample_abund, Transect), 
+    by = c("Date", "id")
+) %>% 
+pivot_longer(
+    cols = -all_of(c("Date", "id", "sample_abund", "Transect")),
+    names_to = "Variable",
+    values_to = "Value"
+) %>% ggplot() + 
+geom_point(aes(x = Value, y = log10(sample_abund), col = Transect)) +
+facet_wrap(~ Variable, scales = "free")
+
 
 
 cleaned_data <- data_fit %>% 
@@ -690,46 +778,8 @@ mutate(
     by = c("Date", "id")
 ) %>% ggplot() + 
 geom_point(aes(x = TRIX, y = log10(sample_abund), col = New_basin)) + 
-geom_smooth(aes(x = TRIX, y = log10(sample_abund), col = New_basin), method = "lm") #+ 
+geom_smooth(aes(x = TRIX, y = log10(sample_abund), col = New_basin), method = "lm") + 
 facet_wrap(~New_basin)
-
-sample_abund %>% colnames()
-
-chem_phys %>% mutate(
-    chla_gm3 = Chla * 0.8935, 
-    NO3_gm3 = NO3 * 0.062,
-    NH4_gm3 = NH4 * 0.018,
-    TP_gm3 = TP * 0.031,
-) %>% pull(chla_gm3) %>% quantile(., probs = seq(0, 1, 0.25), na.rm = TRUE)
-
-
-chem_phys %>% mutate(
-    chla_gm3 = Chla * 0.8935, 
-    DIN_gm3 = NO3 * 0.062 +  NH4 * 0.018,
-    TP_gm3 = TP * 0.031,
-    O_dev = abs(O_sat - 100),
-) %>% 
-mutate(
-      a =   (log10(chla_gm3) - log10(min(chla_gm3, na.rm = TRUE))) / (log10(max(chla_gm3, na.rm = TRUE)) - log10(min(chla_gm3, na.rm = TRUE))), 
-      b =   (log10(DIN_gm3) - log10(min(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE))) / (log10(max(DIN_gm3, na.rm = TRUE)) - log10(min(DIN_gm3[DIN_gm3 != 0], na.rm = TRUE))),
-      c =   (log10(TP_gm3) - log10(min(TP_gm3[TP_gm3 != 0], na.rm = TRUE))) / (log10(max(TP_gm3, na.rm = TRUE)) - log10(min(TP_gm3[TP_gm3 != 0], na.rm = TRUE))), 
-      d =   (log10(O_dev) - log10(min(O_dev[O_dev != 0], na.rm = TRUE))) / (log10(max(O_dev, na.rm = TRUE)) - log10(min(O_dev[O_dev != 0], na.rm = TRUE)))
-    )%>% pull(d)
-
-
-chem_phys %>% mutate(
-    chla_gm3 = Chla * 0.8935, 
-    DIN_gm3 = NO3 * 0.062 +  NH4 * 0.018,
-    TP_gm3 = TP * 0.031,
-    O_dev = abs(O_sat - 100),
-) %>% 
-mutate(
-    a = log10(DIN_gm3), 
-    b  = log10(min(DIN_gm3, na.rm = TRUE)),
-    c = log10(max(DIN_gm3, na.rm = TRUE))
-) %>% head()
-
-sum(chem_phys %>% pull(O_sat) == 0, na.rm = TRUE)
 
 
 chem_phys %>% mutate(
@@ -747,74 +797,75 @@ mutate(
     )
 ) %>% merge(
     sample_abund, 
-    by = c("Date", "id")) %>%
-dplyr::filter(is.finite(TRIX) & !is.na(TRIX)) %>%
-group_by(New_basin) %>%
-summarise(
-    model = list(lm(log10(sample_abund) ~ TRIX, data = cur_data()))
-) %>%
-mutate(
-    summary = lapply(model, summary),
-    coefficients = lapply(summary, function(x) x$coefficients)
-) %>% pull(coefficients)
+    by = c("Date", "id")
+) %>% merge(
+    abund_groups %>% pivot_wider(
+    names_from = Group, 
+    values_from = Abund, 
+    values_fill = 0
+) %>% mutate(
+    DIA_DIN = DIA / DIN, 
+    COC_DIN = COC / DIN,
+    CRY_DIN = CRY / DIN
+) %>% dplyr::select(Date, id, DIA_DIN, COC_DIN, CRY_DIN), 
 
+by = c("Date", "id")
+) %>% ggplot() + 
+geom_point(aes(x = TRIX, y = log10(DIA_DIN), col = Season)) + 
+facet_wrap(~New_basin) 
 
-cleaned_data %>% colnames()
-#Using all variables
-all_vars <-  c("DO", "NH4", "NO3", "O_sat", "PO4", "Salinity", "SiO4", "T", "TN", "TP", "pH", "DIN_TN", "Closest_coast")
-
-model <- lm(
-            paste("log10(sample_abund) ~", paste(all_vars, collapse = " + ")), 
-            data = cleaned_data #%>% dplyr::filter(Region != "CAM")
-        )
-summary(model)
-data.frame(
-    res = resid(model), 
-    fitted = fitted(model),
-    Basin = cleaned_data %>% pull(New_basin)
+merge(
+    abund_groups %>% pivot_wider(
+    names_from = Group, 
+    values_from = Abund, 
+    values_fill = 0
+) %>% mutate(
+    DIA_DIN = DIA / DIN
+) %>% dplyr::select(Date, id, DIA_DIN, Season), 
+    phyto_abund %>% dplyr::select(Latitude, Longitude, id) %>% distinct(), 
+    by = "id"
 ) %>% 
-ggplot() +
-geom_boxplot(aes(x = Basin, y = res, col = Basin)) #+ 
-stat_ellipse(aes(x = fitted, y = res, col = Basin))
+ggplot() + 
+geom_point(aes(x = Longitude, y = Latitude, col = log10(DIA_DIN), size = log10(DIA_DIN) + 3)) + 
+facet_wrap(~Season, scales = "free") 
 
 
-vars <- c("DO", "NH4", "O_sat", "PO4", "Salinity", "T", "Closest_coast")
-model <- lm(
-            paste("log10(sample_abund) ~", paste(c(vars, "New_basin"), collapse = " + ")), 
-            data = cleaned_data #%>% dplyr::filter(Region != "CAM")
-        )
-summary(model)
 
-data.frame(
-    res = resid(model), 
-    fitted = fitted(model),
-    Basin = cleaned_data %>% pull(New_basin)
-) %>% 
-ggplot() +
-geom_boxplot(aes(x = Basin, y = res, col = Basin))# + 
-stat_ellipse(aes(x = fitted, y = res, col = Basin))
+chem_phys <- read.csv(paste(HOME_, "df_chem_phys.csv", sep = "/"))
+chem_phys <- compute_TRIX(chem_phys)
+chem_phys <- chem_phys %>% mutate(
+                   #  NO_rat = NO2 / NO3, 
+                   #DIN_TN = (NH4 + NO3) / TN,
+                   # P_rat = PO4 / TP, 
+                    NP = NO3 / PO4, 
+                    NP_tot = TN / TP
+)
 
 
-data.frame(
-    res = resid(model), 
-    fitted = fitted(model),
-    Basin = cleaned_data %>% pull(New_basin)
-) %>% cbind(cleaned_data %>% dplyr::select(-Basin)) %>%
-ggplot() +
-geom_point(aes(x = DO, y = fitted, col = Basin)) + 
-stat_ellipse(aes(x = DO, y = fitted, col = Basin))
-geom_smooth(aes(x = DO, y = res, col = Basin), method = "lm") 
+chem_phys <- chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla)) %>%
+dplyr::filter(
+  DO < 400, 
+  NH4 < 10,
+  NO3 < 57, 
+  O_sat < 160, 
+  pH > 7, 
+  PO4 < 2, 
+  Salinity > 20, 
+  SiO4 < 40, 
+  TN < 120, 
+  NP_tot < 204
+  )
 
-data.frame(
-    res = resid(model), 
-    fitted = fitted(model),
-    Basin = cleaned_data  %>% dplyr::filter(Region != "CAM") %>% pull(New_basin)
-) %>% cbind(cleaned_data %>% dplyr::filter(Region != "CAM") %>% dplyr::select(-Basin)) %>% 
-ggplot() +
-geom_point(aes(x = Basin, y = fitted, col = Basin))
+data_test <- chem_phys %>%
+merge(
+    sample_abund %>% dplyr::select(Date, id, sample_abund, Season, New_basin, Region),
+    by = c("Date", "id")
+) %>% dplyr::filter(
+    Region %in% c("FVG", "VEN", "EMR")
+)
 
-
-cleaned_data %>% dplyr::filter(New_basin == 'ST')
-
-
-cleaned_data %>% dplyr::filter(Region == 'BAS')
+data_test %>% 
+ggplot() + 
+geom_point(aes(x = TRIX, y = log10(sample_abund))) + 
+facet_wrap(~Region, scales = "free") 
+dev.off()

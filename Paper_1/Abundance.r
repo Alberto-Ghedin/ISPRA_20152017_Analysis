@@ -3,13 +3,46 @@ library(dplyr)
 library(tidyr)
 library(scales)
 library(tidyverse)
-library(ggh4x)
-library(legendry)
+#library(ggh4x)
+#library(legendry)
 library(rjson)
 library(openxlsx)
 library(colorBlindness)
 
-IMAGE_FORMAT <- "svg"
+plot_variable_along_coast <- function(data, var, group, title, ylab, ordered_latitude = ordered_latitude, ordered_longitude = ordered_longitude) {
+    colors <- scales::hue_pal()(length(unique(data[[group]])))
+    palette <- setNames(colors, sort(as.character(data[[group]] %>% unique())))
+    p <- data %>% 
+    mutate(index_id = match(id, params$ordered_id)) %>% 
+    ggplot(aes(x = index_id, y = !!as.symbol(var))) + 
+    geom_boxplot(aes(group = id, fill = !!as.symbol(group))) +
+    scale_fill_manual(values = palette) + 
+    labs(title = title, y = ylab) +
+    scale_x_continuous(
+        name = "Latitude",
+        breaks =  seq(1, length(params$ordered_id), 3), 
+        labels = one_every_n_item(ordered_latitude, 3),
+        limits = c(-0.01, 162.01), 
+        sec.axis = sec_axis(
+          ~., 
+          name = "Longitude",
+          breaks = seq(1, length(params$ordered_id), 3),
+          labels = one_every_n_item(ordered_longitude, 3)
+        )
+    ) + 
+    ggplot2::theme(
+            axis.text.x.bottom = element_text(angle = 45, hjust = 1, size = 17),
+            axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0, size = 17),
+            axis.text.y = element_text(angle = 0, hjust = 0, size = 17),
+            axis.title.y = element_text(size = 22),
+            axis.title.x = element_text(size = 22),
+            plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
+            legend.text = element_text(size = 15),
+            legend.title = element_text(size = 18, face = "bold"),
+        ) 
+    return(p)
+} 
+
 
 ggplot_theme <- ggplot2::theme_bw() +
     ggplot2::theme(
@@ -51,7 +84,9 @@ sciencific_notation <- function(x) {
     return(y)
 }
 
-HOME_ <- "."
+IMAGE_FORMAT <- "svg"
+HOME_ <- "./Paper_1"
+
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
 phyto_abund <- phyto_abund %>% mutate(
     New_basin = case_when(
@@ -130,8 +165,6 @@ abund$Transect <- factor(abund$Transect, levels = ordered_transect, ordered = TR
 abund$New_basin <- factor(abund$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 abund <- abund %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) 
 
-phyto_abund %>% dplyr::filter(Region == "ABR") %>% arrange(desc(Num_cell_l)) %>%  group_by(Taxon) %>% summarize(mean_a = mean(Num_cell_l)) %>% arrange(desc(mean_a))
-phyto_abund %>% dplyr::filter(Region == "MOL") %>% arrange(desc(Num_cell_l)) %>%  group_by(Taxon) %>% summarize(mean_a = mean(Num_cell_l)) %>% arrange(desc(mean_a))
 
 one_every_n_item <- function(list, n) {
     return(
@@ -144,37 +177,18 @@ ordered_latitude <- abund %>% dplyr::select(id, Latitude) %>% distinct() %>%
 arrange(id = factor(id, levels = params$ordered_id, ordered = TRUE)) %>% pull(Latitude) %>% round(2)
 ordered_longitude <- abund %>% dplyr::select(id, Longitude) %>% distinct() %>%
 arrange(id = factor(id, levels = params$ordered_id, ordered = TRUE)) %>% pull(Longitude) %>% round(2)
-colors <- scales::hue_pal()(length(unique(abund$New_basin)))
-#sorting to be cosistent with color legend of the map 
-palette <- setNames(colors, sort(as.character(phyto_abund$New_basin %>% unique())))
-p <- abund %>% 
-mutate(index_id = match(id, params$ordered_id)) %>% 
-ggplot(aes(x = index_id, y = log10(Abund +1))) + 
-geom_boxplot(aes(group = id, fill = New_basin)) +
-scale_fill_manual(values = palette) + 
-labs(title = "Sample abundance across all stations", y = "Abundance [cells/L] (log scale)") +
-scale_x_continuous(
-    name = "Latitude",
-    breaks =  seq(1, length(params$ordered_id), 3), 
-    labels = one_every_n_item(ordered_latitude, 3),
-    limits = c(-0.01, 162.01), 
-    sec.axis = sec_axis(
-      ~., 
-      name = "Longitude",
-      breaks = seq(1, length(params$ordered_id), 3),
-      labels = one_every_n_item(ordered_longitude, 3)
-    )
-) + 
-ggplot2::theme(
-        axis.text.x.bottom = element_text(angle = 45, hjust = 1, size = 17),
-        axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0, size = 17),
-        axis.text.y = element_text(angle = 0, hjust = 0, size = 17),
-        axis.title.y = element_text(size = 22),
-        axis.title.x = element_text(size = 22),
-        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
-        legend.text = element_text(size = 15),
-        legend.title = element_text(size = 18, face = "bold"),
-    ) 
+p <- plot_variable_along_coast(
+    abund %>% mutate(
+        Abund = log10(Abund + 1)
+    ), 
+    var = "Abund", 
+    group = "New_basin", 
+    title = "Sample abundance across all stations", 
+    ylab = "Abundance [cells/L] (log scale)", 
+    ordered_latitude = ordered_latitude, 
+    ordered_longitude = ordered_longitude
+)
+
 ggsave(
     file.path(HOME_, "abundance_per_basin.svg"), 
     p, 
@@ -182,6 +196,9 @@ ggsave(
     height = 8.5, 
     dpi = 300
 )
+
+
+
 
 kruskal_abund_test <- sapply(
     abund %>% pull(New_basin) %>% unique(),
@@ -243,14 +260,7 @@ abund_groups <- abund_groups %>% mutate(
         Region == "SAR" ~ "SAR"
     )
 )
-abund_groups$Region <- factor(abund_groups$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
-abund_groups$Basin <- factor(abund_groups$Basin, levels = ordered_basins, ordered = TRUE)
-abund_groups$Season <- factor(abund_groups$Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)
-abund_groups$New_basin <- factor(abund_groups$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
-abund_groups <- abund_groups %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30"))
-
-
-p <- abund_groups %>% 
+abund_groups <- abund_groups %>% 
 mutate(
     Group = case_when(
         higher_group == "Dinoflagellata" ~ "DIN",
@@ -260,7 +270,31 @@ mutate(
         higher_group != "Unknown" ~ "Else",
         higher_group == "Unknown" ~ "UNK"
     )
-) %>% group_by(Season, New_basin, Group) %>%
+) %>% group_by(Date, id, Group) %>%
+summarise(
+    Abund = sum(Abund),
+    Region = first(Region),
+    Season = first(Season),
+    New_basin = first(New_basin),
+    .groups = "drop"
+)
+abund_groups$Region <- factor(abund_groups$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
+#abund_groups$Basin <- factor(abund_groups$Basin, levels = ordered_basins, ordered = TRUE)
+abund_groups$Season <- factor(abund_groups$Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)
+abund_groups$New_basin <- factor(abund_groups$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
+abund_groups <- abund_groups %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30"))
+
+
+abund_groups %>% pivot_wider(
+    names_from = Group, 
+    values_from = Abund, 
+    values_fill = 0
+) %>% mutate(
+    DIA_DIN = DIA / DIN
+) %>% ggplot() + 
+geom_boxplot(aes(x = New_basin, y = log10(DIA_DIN), fill = Season))
+
+p <- abund_groups %>% group_by(Season, New_basin, Group) %>%
 summarise(
     Abund = quantile(Abund, 0.75),
     .groups = "drop"
@@ -348,45 +382,17 @@ ggsave(
 
 
 
-abund_only_genera <- phyto_abund %>% 
-    dplyr::filter(Det_level %in% c("Species", "Genus")) %>%
-    group_by(Date, id, Genus) %>% 
-    summarize(
-        Abund = sum(Num_cell_l), 
-        Basin = first(New_basin),
-        Season = first(Season),
-        Class = first(Class),
-        .groups = "drop"
-    ) 
 
 
 
-library(vegan)
-sites_genera <- abund_only_genera %>% dplyr::select(
-    Date, id, Genus, Abund, Basin, Season
-) %>% pivot_wider(
-    names_from = Genus, 
-    values_from = Abund, 
-    values_fill = 0
-)
-Shannon_index <- sites_genera %>% dplyr::select() %>% diversity()
-Pielou_even <- Shannon_index / log(specnumber(sites_genera %>% dplyr::select(where(is.numeric))))
-cbind(
-    sites_genera %>% dplyr::select(Date, id, Basin, Season),
-    Shannon_index
-) %>% mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)) %>%
-ggplot() + 
-geom_point(aes(y = Season, x = Shannon_index)) +
-scale_y_discrete(limits = rev) + 
-facet_wrap(~Basin, ncol = 1)
-
-Pielou_even %>% length()
 
 
 
-sheets <- getSheetNames("./indval_only_genera_per_basin.xlsx")
+
+
+sheets <- getSheetNames(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"))
 all_data <- sapply(sheets, function(sheet) {
-    data <- openxlsx::read.xlsx("./indval_only_genera_per_basin.xlsx", sheet = sheet, colNames = TRUE)
+    data <- openxlsx::read.xlsx(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"), sheet = sheet, colNames = TRUE)
     colnames(data)[1] <- "Taxon"
     data <- data %>% dplyr::filter(Taxon != "Other phytoplankton")
     return(data)
@@ -405,14 +411,11 @@ summarise(
     .groups = "drop"
 )
 
-quantile_abund_genera %>% head(20)
-
-phyto_abund %>% dplyr::filter(Genus == "Emiliania") %>% pull(Region) %>% unique()
-
 
 dominant_species_path <- paste(HOME_, "Dominant_species", sep = "/")
 dir.create(dominant_species_path, showWarnings = FALSE)
 
+library(patchwork)
 sapply(
     names(all_data),
     function(basin) {
@@ -425,83 +428,67 @@ sapply(
                 rel_abund = Abund / sum(Abund), 
                 .groups = "drop"
             ) %>% dplyr::filter(rel_abund > 0.03) %>% pull(Genus) %>% unique()
-        p <-  quantile_abund_genera %>% dplyr::filter(Genus %in% dominant_genera & Basin == basin) %>% 
+        barplot <-  quantile_abund_genera %>% dplyr::filter(Genus %in% dominant_genera & Basin == basin) %>% 
             mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)) %>%
             group_by(Season, Basin) %>% 
             mutate(
                 rel_abund = Abund / sum(Abund), 
                 .groups = "drop"
             ) %>% 
-            ggplot(aes(x = Season, fill = Genus, y = rel_abund)) +
+            ggplot(aes(y = Season, fill = Genus, x = rel_abund)) +
+            scale_y_discrete(limits = rev) +
             geom_bar(stat = "identity", linewidth = 0.5, color = "black") + 
-            labs(y = "Relative abundance", x = "Season") +
-            ggplot_theme + theme(legend.position = "right") + 
+            labs(x = "Relative abundance", y = "Season") +
+            ggplot_theme + theme(legend.position = "bottom") + 
+            guides(fill = guide_legend(ncol = 3)) + 
             scale_fill_manual(values = unname(colorBlindness::paletteMartin))
+        
+        selected_genera <- all_data[[basin]] %>% rowwise() %>%
+        dplyr::filter(max(c_across(where(is.numeric))) > 0.3) %>%
+        ungroup() %>% pull(Taxon)
+        sites_genera <- abund_only_genera %>% dplyr::select(
+            Date, id, Genus, Abund, Basin, Season
+        ) %>% dplyr::filter(Genus %in% selected_genera & Basin == basin) %>% pivot_wider(
+            names_from = Genus, 
+            values_from = Abund, 
+            values_fill = 0
+        )
+        Shannon_index <- sites_genera %>% dplyr::select(where(is.numeric)) %>% diversity()
+        Pielou_even <- Shannon_index / log(specnumber(sites_genera %>% dplyr::select(where(is.numeric))))
+        even <- cbind(
+            sites_genera %>% dplyr::select(Date, id, Basin, Season),
+            Pielou_even
+        ) %>% mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE))
+        evenness_plot <- even %>% 
+            ggplot() + 
+            geom_boxplot(aes(y = Season, x = Pielou_even)) +
+            scale_y_discrete(limits = rev) +
+            labs(x = "Pielou's evenness") +
+            theme_minimal() +
+            theme(
+                axis.title.y = element_blank(),
+                axis.text.y = element_blank(),
+                axis.ticks.y = element_blank(),
+                legend.position = "none",
+                axis.text.x = element_text(angle = 0, hjust = 0, size = 17),
+                axis.title.x = element_text(size = 22),
+            )
+        
         ggsave(
             file.path(dominant_species_path, basin),
             device = IMAGE_FORMAT, 
-            p, 
-            width = 12, 
-            height = 8, 
+            barplot + evenness_plot + plot_layout(ncol = 2, widths = c(0.5, 0.5)), 
+            width = 15, 
+            height = 10, 
             dpi = 300
         )
     }
 )
 
 
-library(VennDiagram)
-
-
-fold_change <- abund_groups %>% #dplyr::filter(Region %in% c("FVG", "VEN", "EMR")) %>% 
-mutate(
-    Group = case_when(
-        higher_group == "Dinoflagellata" ~ "DIN",
-        higher_group == "Bacillariophyceae" ~ "DIA",
-        higher_group == "Coccolithophyceae" ~ "COC",
-        higher_group == "Cryptophyceae" ~ "CRY",
-        higher_group != "Unknown" ~ "Else",
-        higher_group == "Unknown" ~ "UNK"
-    )
-) %>% group_by(id, Date, Group) %>% summarise(Abund = sum(Abund), Season = first(Season), New_basin = first(New_basin), .groups = "drop") %>%
-complete(Group, nesting(Season, New_basin), fill = list(Abund = 0)) %>% 
-group_by(New_basin, Group) %>% mutate(annual_mean = mean(Abund), annual_median = median(Abund), annual_quantile = quantile(Abund, 0.75), .groups = "drop") %>% 
-group_by(Season, New_basin, Group) %>% 
-summarise(
-    seasonal_mean = mean(Abund), seasonal_median = median(Abund), seasonal_quantile = quantile(Abund, 0.75),
-    annual_mean = first(annual_mean), annual_median = first(annual_median), annual_quantile = first(annual_quantile), 
-    .groups = "drop"
-    ) %>% 
-mutate(fold_mean = seasonal_mean / annual_mean, fold_median = seasonal_median / annual_median, fold_quantile = seasonal_quantile / annual_quantile)
-
-
-
-p <- fold_change %>% ggplot(aes(x = Season, y = Group, fill = fold_mean)) +
-geom_tile() +
-geom_text(aes(label = round(fold_mean, 2), colour = ifelse(fold_mean > 1, "black", "white")), 
-size = 8) + 
-facet_wrap(~New_basin, ncol = 2) + 
-labs(title = "Distribution of abundance of main phytoplankton groups", x = "Season", y = "Group") +
-ggplot_theme + theme(legend.position = "bottom") +
-ggplot_fill_scale(NULL, "Abundance [cell/L] (log scale)") 
-ggsave(
-    file.path(HOME_, "abundance_per_group_heatmap_fold_mean.svg"), 
-    p, 
-    width = 12, 
-    height = 13, 
-    dpi = 300
-)
-
-
-
-
-
-
-
-
 
 
 library(patchwork)
-
 species_abund_rich <- phyto_abund %>% mutate(
     Group = case_when(
         Class == "Dinoflagellata incertae sedis" ~ "DINO",

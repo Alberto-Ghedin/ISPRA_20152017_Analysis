@@ -4,13 +4,57 @@ library(tidyr)
 library(MASS) 
 library(tibble)
 library(openxlsx)
+library(ggspatial)
+library(sf) 
 
-
-rivers <- openxlsx::read.xlsx("./EFAS_rivers.xlsx")
-phyto_abund <- read.csv("./phyto_abund.csv")
-phyto_abund %>% head()
+HOME_ <- "./Paper_1"
+rivers <- openxlsx::read.xlsx(paste(HOME_, "EFAS_rivers.xlsx", sep = "/"))
+phyto_abund <- read.csv(paste(HOME_,"phyto_abund.csv", sep ="/"))
 stations <- phyto_abund %>% dplyr::distinct(id, Longitude, Latitude)
 rivers_mouths <- rivers %>% dplyr::select(rivername, lon_mouth, lat_mouth)
+
+italy <- st_read(paste(HOME_, "Italy_shp/Italy.shp", sep = "/"))
+surroundings <- st_read(paste(HOME_,"Surrounding_shp/Surrounding.shp", sep = "/"))
+basins <- st_read(paste(HOME_,"Basins_shp/Basins.shp", sep = "/"))
+
+ordered_transect <- c(
+    "SMTS", "SMLG", "VENEZIA", "ROSOLINA", "PORTO_GARIBALDI", "CESENATICO", "RIMINI", "Chienti", "Esino", "GU",
+    "VA", "R14001_B2", "FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO", "PORTO_CESAREO", "PUNTA_RONDINELLA", "SINNI", "Villapiana",
+    "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche", "Isole_Ciclopi", "Plemmirio", "Isola_Correnti", "San_Marco", "Isole_Egadi", "Capo_Gallo","Vibo_marina", 
+    "Cetraro", "Cilento", "Salerno", "Napoli", "Domizio", "m1lt01", "m1lt02",  "m1rm03",  "m1vt04", "Collelungo","Carbonifera",
+    "Donoratico", "Fiume_Morto", "Mesco" , "Portofino"  ,  "Voltri"  , "Quiliano" , 
+    "Olbia", "Arbatax", "Villasimius", "Cagliari", "Oristano", "Alghero", "Porto_Torres"
+
+)
+sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
+
+stations <- merge(
+    stations, 
+    sea_depth %>% dplyr::select(id, SeaDepth, Transect)
+)
+stations$Transect <- factor(stations$Transect, levels = ordered_transect, ordered = TRUE)
+stations <- stations %>% group_by(Transect) %>% 
+    summarise(
+        Longitude = mean(Longitude, na.rm = TRUE),
+        Latitude = mean(Latitude, na.rm = TRUE), 
+        .groups = "drop"
+    )
+
+ggplot() + 
+geom_sf(data = italy, fill = "lightgrey", color = "black") + 
+geom_point(data = stations, aes(x = Longitude, y = Latitude), color = "blue", size = 2) + 
+geom_text(data = stations %>% group_by(Transect) %>% 
+    summarise(
+        Longitude = mean(Longitude, na.rm = TRUE),
+        Latitude = mean(Latitude, na.rm = TRUE), 
+        .groups = "drop"
+    ), aes(x = Longitude, y = Latitude, label = Transect), hjust = 0.5, vjust = -0.1, size = 3) +
+geom_point(data = rivers_mouths, aes(x = lon_mouth, y = lat_mouth), color = "red", size = 1) +
+geom_text(data = rivers_mouths, aes(x = lon_mouth, y = lat_mouth, label = rivername), hjust = 1.5, vjust = -0.5, size = 3) +
+labs(title = "Stations and Rivers Mouths",
+     x = "Longitude",
+     y = "Latitude") +
+theme_minimal()
 
 library(terra)
 stations_vect <- terra::vect(stations, geom = c("Longitude", "Latitude"), crs = "EPSG:4326")
@@ -46,5 +90,36 @@ for (i in seq_along(length(stations$id))) {
   }
 }
 
-result_long
+# Compute distance from Po river for stations in EMR
+# Filter Po river mouth
+cam_stations <- phyto_abund %>% dplyr::filter(Region == "CAM") %>% dplyr::distinct(id, Longitude, Latitude)
 
+# Convert to sf objects for distance calculation
+cam_sf <- st_as_sf(cam_stations, coords = c("Longitude", "Latitude"), crs = 4326)
+rivers_sf <- st_as_sf(rivers_mouths, coords = c("lon_mouth", "lat_mouth"), crs = 4326)
+
+# Find nearest river for each CAM station
+nearest_river_idx <- st_nearest_feature(cam_sf, rivers_sf)
+cam_sf$nearest_river <- rivers_mouths$rivername[nearest_river_idx]
+cam_sf$riv_dist <- as.numeric(st_distance(cam_sf, rivers_sf[nearest_river_idx, ], by_element = TRUE) / 1000)
+
+
+
+phyto_abund %>% dplyr::filter(Region == "CAM") %>% 
+dplyr::group_by(Date, id) %>% 
+dplyr::summarise(
+  sample_abund = sum(Num_cell_l), 
+  .groups = "drop"
+) %>% 
+merge(
+  stations, 
+  by = "id",
+) %>%
+merge( 
+cam_sf %>% dplyr::select(id, riv_dist) %>% as.data.frame(), 
+  by = "id",
+) %>% 
+lm(
+  log10(sample_abund) ~ riv_dist, 
+  data = .
+) %>% summary()
