@@ -260,7 +260,8 @@ phyto_abund %>% group_by(Region, Date, id) %>% summarise(
 geom_point(aes(x = log10(Abund + 1), y = n_genera, color = Region))
 ##PER BASIN##
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
-genus_observation <- phyto_abund %>% 
+genus_obsordered_basins
+ordered_transectervation <- phyto_abund %>% 
 filter(Det_level == "Genus" | Det_level == "Species") %>% 
 group_by(Basin, Date, id, Genus) %>% summarise(Abund = sum(Num_cell_l)) %>% 
 pivot_wider( names_from = Genus, values_from = Abund, values_fill = 0) %>% ungroup()

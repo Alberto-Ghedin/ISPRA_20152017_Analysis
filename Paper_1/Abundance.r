@@ -9,39 +9,9 @@ library(rjson)
 library(openxlsx)
 library(colorBlindness)
 
-plot_variable_along_coast <- function(data, var, group, title, ylab, ordered_latitude = ordered_latitude, ordered_longitude = ordered_longitude) {
-    colors <- scales::hue_pal()(length(unique(data[[group]])))
-    palette <- setNames(colors, sort(as.character(data[[group]] %>% unique())))
-    p <- data %>% 
-    mutate(index_id = match(id, params$ordered_id)) %>% 
-    ggplot(aes(x = index_id, y = !!as.symbol(var))) + 
-    geom_boxplot(aes(group = id, fill = !!as.symbol(group))) +
-    scale_fill_manual(values = palette) + 
-    labs(title = title, y = ylab) +
-    scale_x_continuous(
-        name = "Latitude",
-        breaks =  seq(1, length(params$ordered_id), 3), 
-        labels = one_every_n_item(ordered_latitude, 3),
-        limits = c(-0.01, 162.01), 
-        sec.axis = sec_axis(
-          ~., 
-          name = "Longitude",
-          breaks = seq(1, length(params$ordered_id), 3),
-          labels = one_every_n_item(ordered_longitude, 3)
-        )
-    ) + 
-    ggplot2::theme(
-            axis.text.x.bottom = element_text(angle = 45, hjust = 1, size = 17),
-            axis.text.x.top = element_text(angle = 45, hjust = 0, vjust = 0, size = 17),
-            axis.text.y = element_text(angle = 0, hjust = 0, size = 17),
-            axis.title.y = element_text(size = 22),
-            axis.title.x = element_text(size = 22),
-            plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
-            legend.text = element_text(size = 15),
-            legend.title = element_text(size = 18, face = "bold"),
-        ) 
-    return(p)
-} 
+HOME_ <- "./Paper_1"
+IMAGE_FORMAT <- "svg"
+source(file.path(HOME_, "utils.r"))
 
 
 ggplot_theme <- ggplot2::theme_bw() +
@@ -56,36 +26,6 @@ ggplot_theme <- ggplot2::theme_bw() +
         legend.title = element_text(size = 25, face = "bold"),
     ) 
 
-ggplot_fill_scale <- function(fill_limits, fill_title) {
-    z <- list(
-        ggplot2::scale_fill_continuous(type = "viridis", limits = fill_limits, oob=scales::squish), 
-        ggplot2::scale_colour_manual(values=c("white"="white", "black"="black")), 
-        ggplot2::guides(colour = "none"), 
-        ggplot2::guides(
-        fill = guide_colourbar(
-            title = fill_title, 
-            title.position = "left", 
-            title.theme = element_text(size = 25, face = "bold", margin = margin(r = 3, l = -1), vjust = 1), 
-            label.theme = element_text(size = 20),
-            barwidth = unit(20, "lines"),
-            ticks.linewidth = 1,
-            frame.linewidth = 1,
-            ticks.colour = "black",
-            frame.colour  ='black'
-            )
-        )
-    )
-    return(z)     
-}
-
-sciencific_notation <- function(x) {
-    y <- gsub("\\+0", "", scales::scientific(x, digits = 2))
-    y <- gsub("0\\.0e0", "0", y)
-    return(y)
-}
-
-IMAGE_FORMAT <- "svg"
-HOME_ <- "./Paper_1"
 
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
 phyto_abund <- phyto_abund %>% mutate(
@@ -109,34 +49,6 @@ phyto_abund <- phyto_abund %>% mutate(
 )
 phyto_abund$New_basin <- factor(phyto_abund$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
-from_region_to_abreviation <- c(
-    "Friuli-Venezia-Giulia" = "FVG",
-    "Veneto" = "VEN", 
-    "Emilia-Romagna" = "EMR",
-    "Marche" = "MAR",
-    "Abruzzo" = "ABR",
-    "Molise" = "MOL",
-    "Puglia" = "PUG",
-    "Basilicata" = "BAS",
-    "Calabria" = "CAL",
-    "Sicilia" = "SIC",
-    "Campania" = "CAM", 
-    "Lazio" = "LAZ",
-    "Toscana" = "TOS",
-    "Liguria" = "LIG",
-    "Sardegna" = "SAR"
-)
-ordered_basins <- c("NorthAdr", "SouthAdr", "Ion", "SouthTyr", "NorthTyr", "WestMed")
-
-ordered_transect <- c(
-    "SMTS", "SMLG", "VENEZIA", "ROSOLINA", "PORTO_GARIBALDI", "CESENATICO", "RIMINI", "Chienti", "Esino", "GU",
-    "VA", "R14001_B2", "FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO", "PORTO_CESAREO", "PUNTA_RONDINELLA", "SINNI", "Villapiana",
-    "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche", "Isole_Ciclopi", "Plemmirio", "Isola_Correnti", "San_Marco", "Isole_Egadi", "Capo_Gallo","Vibo_marina", 
-    "Cetraro", "Cilento", "Salerno", "Napoli", "Domizio", "m1lt01", "m1lt02",  "m1rm03",  "m1vt04", "Collelungo","Carbonifera",
-    "Donoratico", "Fiume_Morto", "Mesco" , "Portofino"  ,  "Voltri"  , "Quiliano" , 
-    "Olbia", "Arbatax", "Villasimius", "Cagliari", "Oristano", "Alghero", "Porto_Torres"
-
-)
 sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
 
 params <- fromJSON(file = file.path(HOME_, "params.json"))
@@ -166,11 +78,7 @@ abund$New_basin <- factor(abund$New_basin, levels = c("NA", "CA", "SA", "SM", "S
 abund <- abund %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) 
 
 
-one_every_n_item <- function(list, n) {
-    return(
-        list[seq(1, length(list), n)]
-    )
-}
+abund_groups <- process_abund_groups(phyto_abund)
 
 
 ordered_latitude <- abund %>% dplyr::select(id, Latitude) %>% distinct() %>% 
@@ -225,66 +133,7 @@ abund %>% dplyr::filter(New_basin == basin) %>% pull(Season), p.adjust.method = 
 
 
 
-abund_groups <- phyto_abund %>% mutate(
-    higher_group = case_when(
-        Class == "Dinoflagellata incertae sedis" ~ "Dinoflagellata",
-        Taxon == "Noctilucea" ~ "Dinoflagellata",
-        Class == "nan" ~ "Unknown", 
-        Class == "Dinophyceae" ~ "Dinoflagellata", 
-        TRUE ~ Class
-    )
-) %>% group_by(Date, id, higher_group) %>%
-summarise(
-    Abund = sum(Num_cell_l),
-    Region = first(Region),
-    Season = first(Season), 
-    Basin = first(Basin), 
-    .groups = "drop"
-)
-abund_groups <- abund_groups %>% mutate(
-    New_basin = case_when(
-        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
-        Region %in% c("MAR", "ABR") ~ "CA", 
-        Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
-        Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
-        Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
-        Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
-        Region == "TOS" ~ "NT",
-        Region == "LIG" ~ "LIG",
-        Region == "SAR" ~ "SAR"
-    )
-)
-abund_groups <- abund_groups %>% 
-mutate(
-    Group = case_when(
-        higher_group == "Dinoflagellata" ~ "DIN",
-        higher_group == "Bacillariophyceae" ~ "DIA",
-        higher_group == "Coccolithophyceae" ~ "COC",
-        higher_group == "Cryptophyceae" ~ "CRY",
-        higher_group != "Unknown" ~ "Else",
-        higher_group == "Unknown" ~ "UNK"
-    )
-) %>% group_by(Date, id, Group) %>%
-summarise(
-    Abund = sum(Abund),
-    Region = first(Region),
-    Season = first(Season),
-    New_basin = first(New_basin),
-    .groups = "drop"
-)
-abund_groups$Region <- factor(abund_groups$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
-#abund_groups$Basin <- factor(abund_groups$Basin, levels = ordered_basins, ordered = TRUE)
-abund_groups$Season <- factor(abund_groups$Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)
-abund_groups$New_basin <- factor(abund_groups$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
-abund_groups <- abund_groups %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30"))
 
-abund_groups %>% colnames()
 abund_groups %>% 
 mutate(Month = format(as.Date(Date), "%m"), 
         Year_month = format(as.Date(Date), "%Y-%m")) %>%
@@ -312,7 +161,6 @@ facet_grid(New_basin ~ ., scale = "free_y") +
 labs(title = "Distribution of abundance of main phytoplankton groups", y = "Season", x = "Group") +
 ggplot_theme + theme(legend.position = "bottom") +
 ggplot_fill_scale(c(2, 6), "Abundance [cell/L] (log scale)") 
-p
 ggsave(
     file.path(HOME_, "abundance_per_group_heatmap.svg"), 
     p, 

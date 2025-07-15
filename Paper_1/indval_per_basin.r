@@ -5,13 +5,12 @@ library(jsonlite)
 library(zoo)
 library(tidyr)
 library(openxlsx)
-library(parallel)
 library(indicspecies)
 library(patchwork)
 library(ggplot2)
-
-HOME_ <- "./Paper_1"
-IMAGE_FORMAT <- "svg"
+library(colorBlindness)
+library(ComplexHeatmap)
+library(circlize)
 
 order_species <- function(df, basins, threshold = 0.5) {
     characteristic_species <- df$Taxon[apply(df[, basins], 1, function(x) any(x >= threshold))]
@@ -23,6 +22,176 @@ order_species <- function(df, basins, threshold = 0.5) {
     arrange(Max_Basin, desc(Max_Value)) %>% pull(Taxon)
     return(ordered_ids)
 }
+
+
+plot_indval <- function(df, basins, threshold, title) {
+    taxa_list <- order_species(df, basins, threshold = 0)
+    complete_indval <- df[, c("Taxon", basins)] %>% dplyr::filter(Taxon %in% taxa_list) %>% 
+    pivot_longer(cols = all_of(basins), names_to = "Basin", values_to = "IndVal") 
+    complete_indval$Taxon <- factor(complete_indval$Taxon, levels = taxa_list)
+    complete_indval$Basin <- factor(complete_indval$Basin, levels = basins)
+
+    taxa_list <- order_species(df, basins, threshold = threshold)
+    partial_indval <- df[, c("Taxon", basins)] %>% dplyr::filter(Taxon %in% taxa_list) %>% 
+    pivot_longer(cols = all_of(basins), names_to = "Basin", values_to = "IndVal") 
+    partial_indval$Taxon <- factor(partial_indval$Taxon, levels = taxa_list)
+    partial_indval$Basin <- factor(partial_indval$Basin, levels = basins)
+
+
+
+    p1 <- complete_indval %>% ggplot(aes(x = Basin, y = Taxon, fill = IndVal)) +
+    geom_tile() + 
+    theme_bw() +
+    theme(
+        axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
+        axis.title.y = element_text(size = 25),
+        axis.title.x = element_text(size = 25),
+        strip.text = element_text(size = 20),
+        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
+        axis.text.y = element_blank(), axis.ticks.y = element_blank()
+        ) + 
+    scale_y_discrete(limits = rev) + 
+    scale_fill_continuous(type = "viridis", limits = c(0, 1)) + 
+    guides(fill = "none")
+
+    p2 <- partial_indval %>% ggplot(aes(x = Basin, y = Taxon, fill = IndVal)) +
+    geom_tile() + 
+    geom_text(aes(label = round(IndVal, 2), colour = ifelse(IndVal > 0.5, "black", "white")), size = 6) +
+    theme_bw() +
+    theme(
+        axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
+        axis.text.y = element_text(size = 20, face = "italic"),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size = 25),
+        strip.text = element_text(size = 20),
+        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
+        #legend.position = "bottom", 
+        #axis.text.y = element_blank(), axis.ticks.y = element_blank()
+        ) + 
+    scale_y_discrete(limits = rev) + 
+    scale_fill_continuous(type = "viridis", limits = c(0, 1)) + 
+    scale_colour_manual(values=c("white"="white", "black"="black")) +
+    guides(colour = "none") + guides(
+        fill = guide_colourbar(
+            title = "IndVal", 
+            title.position = "left", 
+            title.theme = element_text(size = 25, face = "bold", margin = margin(r = 30), vjust = 1), 
+            label.theme = element_text(size = 20),
+            barwidth = unit(20, "lines"),
+            ticks.linewidth = 1,
+            frame.linewidth = 1,
+            ticks.colour = "black",
+            frame.colour  ='black'
+            )
+        )
+
+
+    p <- p1 + p2 + 
+    plot_annotation(
+        title = title, 
+        tag_levels = "A"
+        ) + 
+    plot_layout(guides = "collect") & 
+    theme(
+        legend.position = "bottom", 
+        legend.box.margin = margin(r = 40), 
+        plot.title = element_text(size = 25, hjust = 0.5, face = "bold")
+        )
+    return(p)
+}
+
+
+plot_indval_CM <- function(df, basins, threshold, title, unique_classes) {
+
+    taxa_list_complete <- order_species(df, basins = basins, threshold = 0)
+    complete_indval <- df[, c("Taxon", basins)] %>% column_to_rownames("Taxon") %>% as.matrix()
+    complete_indval <- complete_indval[taxa_list_complete, basins] 
+
+    taxa_list_partial <- order_species(df, basins, threshold = threshold)
+    partial_indval <- df[, c("Taxon", basins)] %>% column_to_rownames("Taxon") %>% as.matrix()
+    partial_indval <- partial_indval[taxa_list_partial, basins]
+
+    palette <- colorBlindness::paletteMartin
+    colors <- setNames(rep(palette, length.out = length(unique_classes)), unique_classes)
+    
+    ha_right_partial <- rowAnnotation(
+      Class = genus_class$Class[match(rownames(partial_indval), genus_class$Genus)],
+      col = list(Class = colors),
+      show_annotation_name = FALSE,
+      annotation_legend_param = list(Class = list(
+        title_gp = gpar(fontsize = 20, fontface = "bold"),
+        labels_gp = gpar(fontsize = 18),
+        direction = "horizontal"
+      ))
+    )
+
+    indval_cell_fun <- function(j, i, x, y, width, height, fill, text_color_threshold = 0.5) {
+        value = partial_indval[i, j]
+        grid.text(sprintf("%.2f", value), x, y, 
+        gp = gpar(fontsize = 15, 
+        col = ifelse(value > text_color_threshold, "black", "white")))
+    }
+
+    # Create custom color mapping to ensure yellow is at value 1
+    color_mapping <- circlize::colorRamp2(
+      breaks = c(0, 0.25, 0.5, 0.75, 1.0),
+      colors = viridis::viridis(5, begin = 0, end = 1)
+    )
+    
+    ht_partial <- Heatmap(
+    partial_indval,
+    name = title,
+    col = color_mapping,
+    column_title = title,
+    column_title_gp = gpar(fontsize = 20, fontface = "bold"),
+    column_names_gp = gpar(fontsize = 18),
+    column_names_rot = 45,
+    column_gap = unit(4, "mm"),
+    cell_fun = indval_cell_fun,
+    heatmap_legend_param = list(
+      title = "IndVal",
+      at = seq(0, 1, by = 0.2),
+      labels = seq(0, 1, by = 0.2),
+      legend_height = unit(10, "cm"),
+      legend_width = unit(5, "cm"),
+      title_gp = gpar(fontsize = 20, fontface = "bold"),
+      labels_gp = gpar(fontsize = 18), 
+      border = "black"
+    ),
+    cluster_rows = FALSE,
+    cluster_columns = FALSE,
+    show_row_names = TRUE,
+    row_names_side = "left",
+    row_names_gp = gpar(fontface = "italic", fontsize = 18),
+    right_annotation = ha_right_partial
+    )
+}
+
+save_heatmap <- function(ht, filename, format = "pdf", width = 6, height = 5, res = 300) {
+  # Extract base name and make sure extension matches format
+  ext <- tolower(format)
+  if (!grepl(paste0("\\.", ext, "$"), filename)) {
+    filename <- paste0(filename, ".", ext)
+  }
+
+  # Open appropriate device
+  switch(ext,
+         pdf = pdf(filename, width = width, height = height),
+         png = png(filename, width = width, height = height, units = "in", res = res),
+         svg = svg(filename, width = width, height = height),
+         tiff = tiff(filename, width = width, height = height, units = "in", res = res),
+         stop("Unsupported format: ", ext)
+  )
+
+  # Draw the heatmap
+  draw(ht)
+
+  # Close device
+  dev.off()
+}
+
+HOME_ <- "./Paper_1"
+IMAGE_FORMAT <- "svg"
 
 phyto_abund <- read.csv(paste(HOME_, "phyto_abund.csv", sep = "/")) 
 id_basin <- phyto_abund %>% dplyr::select(id, Basin) %>% distinct() %>% column_to_rownames("id")
@@ -193,83 +362,6 @@ result_per_basin <- sapply(
 names(result_per_basin) <- abund_only_genera %>% pull(basin) %>% unique()
 write.xlsx(result_per_basin, paste(HOME_, "indval_only_genera_log2_per_basin.xlsx", sep = "/"), rowNames = TRUE)
 
-plot_indval <- function(df, basins, threshold, title) {
-    taxa_list <- order_species(df, basins, threshold = 0)
-    complete_indval <- df[, c("Taxon", basins)] %>% dplyr::filter(Taxon %in% taxa_list) %>% 
-    pivot_longer(cols = all_of(basins), names_to = "Basin", values_to = "IndVal") 
-    complete_indval$Taxon <- factor(complete_indval$Taxon, levels = taxa_list)
-    complete_indval$Basin <- factor(complete_indval$Basin, levels = basins)
-
-    taxa_list <- order_species(df, basins, threshold = threshold)
-    partial_indval <- df[, c("Taxon", basins)] %>% dplyr::filter(Taxon %in% taxa_list) %>% 
-    pivot_longer(cols = all_of(basins), names_to = "Basin", values_to = "IndVal") 
-    partial_indval$Taxon <- factor(partial_indval$Taxon, levels = taxa_list)
-    partial_indval$Basin <- factor(partial_indval$Basin, levels = basins)
-
-
-
-    p1 <- complete_indval %>% ggplot(aes(x = Basin, y = Taxon, fill = IndVal)) +
-    geom_tile() + 
-    theme_bw() +
-    theme(
-        axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
-        axis.title.y = element_text(size = 25),
-        axis.title.x = element_text(size = 25),
-        strip.text = element_text(size = 20),
-        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
-        axis.text.y = element_blank(), axis.ticks.y = element_blank()
-        ) + 
-    scale_y_discrete(limits = rev) + 
-    scale_fill_continuous(type = "viridis", limits = c(0, 1)) + 
-    guides(fill = "none")
-
-    p2 <- partial_indval %>% ggplot(aes(x = Basin, y = Taxon, fill = IndVal)) +
-    geom_tile() + 
-    geom_text(aes(label = round(IndVal, 2), colour = ifelse(IndVal > 0.5, "black", "white")), size = 6) +
-    theme_bw() +
-    theme(
-        axis.text.x = element_text(angle = 0, hjust = 0.5, size = 20),
-        axis.text.y = element_text(size = 20, face = "italic"),
-        axis.title.y = element_blank(),
-        axis.title.x = element_text(size = 25),
-        strip.text = element_text(size = 20),
-        plot.title = element_text(size = 25, hjust = 0.5, face = "bold"),
-        #legend.position = "bottom", 
-        #axis.text.y = element_blank(), axis.ticks.y = element_blank()
-        ) + 
-    scale_y_discrete(limits = rev) + 
-    scale_fill_continuous(type = "viridis", limits = c(0, 1)) + 
-    scale_colour_manual(values=c("white"="white", "black"="black")) +
-    guides(colour = "none") + guides(
-        fill = guide_colourbar(
-            title = "IndVal", 
-            title.position = "left", 
-            title.theme = element_text(size = 25, face = "bold", margin = margin(r = 30), vjust = 1), 
-            label.theme = element_text(size = 20),
-            barwidth = unit(20, "lines"),
-            ticks.linewidth = 1,
-            frame.linewidth = 1,
-            ticks.colour = "black",
-            frame.colour  ='black'
-            )
-        )
-
-
-    p <- p1 + p2 + 
-    plot_annotation(
-        title = title, 
-        tag_levels = "A"
-        ) + 
-    plot_layout(guides = "collect") & 
-    theme(
-        legend.position = "bottom", 
-        legend.box.margin = margin(r = 40), 
-        plot.title = element_text(size = 25, hjust = 0.5, face = "bold")
-        )
-    return(p)
-}
-
-
 
 
 sheets <- getSheetNames(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"))
@@ -323,109 +415,17 @@ genus_class <- phyto_abund %>%
     arrange(Genus) %>%
     distinct()
 
-
-library(colorBlindness)
-library(ComplexHeatmap)
-library(circlize)
-save_heatmap <- function(ht, filename, format = "pdf", width = 6, height = 5, res = 300) {
-  # Extract base name and make sure extension matches format
-  ext <- tolower(format)
-  if (!grepl(paste0("\\.", ext, "$"), filename)) {
-    filename <- paste0(filename, ".", ext)
-  }
-
-  # Open appropriate device
-  switch(ext,
-         pdf = pdf(filename, width = width, height = height),
-         png = png(filename, width = width, height = height, units = "in", res = res),
-         svg = svg(filename, width = width, height = height),
-         tiff = tiff(filename, width = width, height = height, units = "in", res = res),
-         stop("Unsupported format: ", ext)
-  )
-
-  # Draw the heatmap
-  draw(ht)
-
-  # Close device
-  dev.off()
-}
-
 unique_classes <- unique(genus_class$Class)
-palette <- colorBlindness::paletteMartin
-colors <- setNames(rep(palette, length.out = length(unique_classes)), unique_classes)
-
-
-# Define cell_fun as a named function for clarity
-
-
-
-
-plot_indval_CM <- function(df, basins, threshold, title) {
-
-    taxa_list_complete <- order_species(df, basins = basins, threshold = 0)
-    complete_indval <- df[, c("Taxon", basins)] %>% column_to_rownames("Taxon") %>% as.matrix()
-    complete_indval <- complete_indval[taxa_list_complete, basins] 
-
-    taxa_list_partial <- order_species(df, basins, threshold = threshold)
-    partial_indval <- df[, c("Taxon", basins)] %>% column_to_rownames("Taxon") %>% as.matrix()
-    partial_indval <- partial_indval[taxa_list_partial, basins]
-
-    ha_right_partial <- rowAnnotation(
-      Class = genus_class$Class[match(rownames(partial_indval), genus_class$Genus)],
-      col = list(Class = colors),
-      show_annotation_name = FALSE,
-      annotation_legend_param = list(Class = list(
-        title_gp = gpar(fontsize = 20, fontface = "bold"),
-        labels_gp = gpar(fontsize = 18),
-        direction = "horizontal"
-      ))
-    )
-
-    indval_cell_fun <- function(j, i, x, y, width, height, fill, text_color_threshold = 0.5) {
-        value = partial_indval[i, j]
-        grid.text(sprintf("%.2f", value), x, y, 
-        gp = gpar(fontsize = 15, 
-        col = ifelse(value > text_color_threshold, "black", "white")))
-    }
-
-    # Create custom color mapping to ensure yellow is at value 1
-    color_mapping <- circlize::colorRamp2(
-      breaks = c(0, 0.25, 0.5, 0.75, 1.0),
-      colors = viridis::viridis(5, begin = 0, end = 1)
-    )
-    
-    ht_partial <- Heatmap(
-    partial_indval,
-    name = title,
-    col = color_mapping,
-    column_title = title,
-    column_title_gp = gpar(fontsize = 20, fontface = "bold"),
-    column_names_gp = gpar(fontsize = 18),
-    column_names_rot = 45,
-    column_gap = unit(4, "mm"),
-    cell_fun = indval_cell_fun,
-    heatmap_legend_param = list(
-      title = "IndVal",
-      at = seq(0, 1, by = 0.2),
-      labels = seq(0, 1, by = 0.2),
-      legend_height = unit(10, "cm"),
-      legend_width = unit(5, "cm"),
-      title_gp = gpar(fontsize = 20, fontface = "bold"),
-      labels_gp = gpar(fontsize = 18), 
-      border = "black"
-    ),
-    cluster_rows = FALSE,
-    cluster_columns = FALSE,
-    show_row_names = TRUE,
-    row_names_side = "left",
-    row_names_gp = gpar(fontface = "italic", fontsize = 18),
-    right_annotation = ha_right_partial
-    )
-}
 
 plots <- mapply(
     function(df, basin) {
-        p <- plot_indval_CM(df %>% mutate(across(where(is.numeric), ~ .^2)), c("Winter", "Spring", "Summer", "Autumn"), 0.25, title = paste("Characteristic species in ", basin, sep = ""))
+        p <- plot_indval_CM(
+            df %>% mutate(across(where(is.numeric), ~ .^2)), 
+            c("Winter", "Spring", "Summer", "Autumn"), 
+            0.25, 
+            title = paste("Characteristic species in ", basin, sep = ""), 
+            unique_classes = unique_classes
+            )
     }, 
     all_data, 
     names(all_data)
@@ -471,4 +471,3 @@ show_heatmap_legend = FALSE,
   show_row_names = FALSE,
   right_annotation = ha_right_complete
 )
-ht_complete %>% draw()
