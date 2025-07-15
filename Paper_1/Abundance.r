@@ -284,15 +284,19 @@ abund_groups$Season <- factor(abund_groups$Season, levels = c("Winter", "Spring"
 abund_groups$New_basin <- factor(abund_groups$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 abund_groups <- abund_groups %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30"))
 
-
-abund_groups %>% pivot_wider(
+abund_groups %>% colnames()
+abund_groups %>% 
+mutate(Month = format(as.Date(Date), "%m"), 
+        Year_month = format(as.Date(Date), "%Y-%m")) %>%
+pivot_wider(
     names_from = Group, 
     values_from = Abund, 
     values_fill = 0
 ) %>% mutate(
     DIA_DIN = DIA / DIN
 ) %>% ggplot() + 
-geom_boxplot(aes(x = New_basin, y = log10(DIA_DIN), fill = Season))
+geom_boxplot(aes(x = Year_month, y = log10(DIA_DIN), fill = Season))# + 
+facet_wrap(~New_basin, ncol = 2)
 
 p <- abund_groups %>% group_by(Season, New_basin, Group) %>%
 summarise(

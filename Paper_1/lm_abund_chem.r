@@ -61,26 +61,46 @@ compute_TRIX <- function(data) {
     max_tp <- data %>% pull(TP[TP !=0]) %>% max(na.rm = TRUE) 
     min_tp <- data %>% pull(TP[TP !=0]) 
     min_tp <- min_tp[min_tp != 0] %>% min(na.rm = TRUE) 
-    data %>% pull(TP[TP !=0])
-    max_o_dev <- abs(data %>% pull(O_sat) %>% max(na.rm = TRUE) - 100)
-    min_o_dev <- abs(data %>% pull(O_sat)  - 100)
+    max_o_dev <- abs(data %>% pull(O_sat) - 100) %>% max(na.rm = TRUE)
+    min_o_dev <- abs(data %>% pull(O_sat) - 100)
     min_o_dev <- min_o_dev[min_o_dev != 0] %>% min(na.rm = TRUE)
  output <- data %>% 
  mutate(
     Chla = ifelse(Chla == 0, min_chla, Chla),
     DIN = ifelse(NO3 + NH4 == 0, min_din, NO3 + NH4),
     TP = ifelse(TP == 0, min_tp, TP),
-    O_dev = ifelse(abs(O_sat - min_o_dev) == 0, min_o_dev, abs(O_sat - min_o_dev))
+    O_dev = ifelse(abs(O_sat - 100) == 0, min_o_dev, abs(O_sat - 100))
     ) %>% 
 mutate(
     TRIX = 10 / 4 * (
-        (log10(Chla) - log10(min_chla)) / (log10(max_chla) - log10(min_chla)) +
-        (log10(DIN) - log10(min_din)) / (log10(max_din) - log10(min_din)) +
-        (log10(TP) - log10(min_tp)) / (log10(max_tp) - log10(min_tp)) + 
-        (log10(O_dev) - log10(min_o_dev)) / (log10(max_o_dev) - log10(min_o_dev))
+        (log10(Chla / min_chla)) / (log10(max_chla / min_chla)) +
+        (log10(DIN / min_din)) / (log10(max_din / min_din)) +
+        (log10(TP / min_tp)) / (log10(max_tp / min_tp)) + 
+        (log10(O_dev / min_o_dev)) / (log10(max_o_dev / min_o_dev))
     )
     )
-    return(output)
+    return(output$TRIX)
+}
+
+compute_TRIX_simplified <- function(data) {
+    min_chla <- data %>% pull(Chla) %>% min(na.rm = TRUE)
+    min_din <- data %>% mutate(DIN = NO3 +  NH4 ) %>% pull(DIN)
+    min_din <- min_din[min_din != 0] %>% min(na.rm = TRUE)
+    min_tp <- data %>% pull(TP[TP !=0]) 
+    min_tp <- min_tp[min_tp != 0] %>% min(na.rm = TRUE) 
+    min_o_dev <- abs(data %>% pull(O_sat) - 100)
+    min_o_dev <- min_o_dev[min_o_dev != 0] %>% min(na.rm = TRUE)
+ output <- data %>% 
+ mutate(
+    Chla = ifelse(Chla == 0, min_chla * 893.5, Chla * 893.5),
+    DIN = ifelse(NO3 + NH4 == 0, min_din, NO3 * 62 + NH4 * 18),
+    TP = ifelse(TP == 0, min_tp * 31, TP * 31),
+    O_dev = ifelse(abs(O_sat - 100) == 0, min_o_dev, abs(O_sat - 100))
+    ) %>% 
+mutate(
+    TRIX = 12 / 10 * (log10(Chla * DIN * TP * O_dev) + 1.5)
+    )
+    return(output$TRIX)
 }
 
 plot_variable_along_coast <- function(data, var, group, title, ylab, ordered_latitude = ordered_latitude, ordered_longitude = ordered_longitude) {
@@ -169,7 +189,10 @@ sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(
     Season = first(Season), 
     Basin = first(Basin),
     Closest_coast = first(Closest_coast),
-    SeaDepth = first(SeaDepth)
+    SeaDepth = first(SeaDepth), 
+    Longitude = first(Longitude),
+    Latitude = first(Latitude), 
+    Region = first(Region),
     ) 
 sample_abund <- sample_abund %>% mutate(
     New_basin = case_when(
@@ -265,15 +288,34 @@ phyto_abund %>% group_by(id) %>% summarise(
 ) %>% arrange(desc(n_samples)) %>% dplyr::filter(n_samples < 10) 
 
 chem_phys <- read.csv(paste(HOME_, "df_chem_phys.csv", sep = "/"))
-chem_phys <- compute_TRIX(chem_phys)
+
 chem_phys <- chem_phys %>% mutate(
                    #  NO_rat = NO2 / NO3, 
                    #DIN_TN = (NH4 + NO3) / TN,
                    # P_rat = PO4 / TP, 
                     NP = NO3 / PO4, 
+                    DIN = NO3 + NH4,
                     NP_tot = TN / TP
 )
 
+chem_phys %>% dplyr::filter(Region == "Lazio") %>% 
+dplyr::filter(
+  #DO < 400, 
+  #NH4 < 10,
+  #NO3 < 57, 
+  #O_sat < 160, 
+  #pH > 7, 
+  #PO4 < 2, 
+  Salinity > 20, 
+  #SiO4 < 40, 
+  #TN < 120, 
+  #NP_tot < 204
+  ) %>% dim()
+
+chem_phys %>% dplyr::filter(Region == "Lazio") %>% 
+dplyr::filter(SiO4 < 40)
+
+chem_phys %>% dplyr::filter(Region == "Lazio") %>% summary()
 vars_to_transform <- c("NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "NP_tot", "pH")
 
 chem_phys <- chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla)) %>%
@@ -289,6 +331,7 @@ dplyr::filter(
   TN < 120, 
   NP_tot < 204
   ) #%>% 
+chem_phys$TRIX <- compute_TRIX(chem_phys)
 merge(
   phyto_abund %>% dplyr::distinct(id, Date, Closest_coast, SeaDepth, Season, New_basin), 
   by = c("Date", "id")
@@ -316,38 +359,61 @@ sample_abund <- merge(
 )
 sample_abund$Transect <- factor(sample_abund$Transect, levels = ordered_transect, ordered = TRUE)
 
-ids <- phyto_abund %>% dplyr::filter(Region == "CAL") %>% pull(id) %>% unique()
+ids <- phyto_abund %>% dplyr::filter(Region %in% c("CAL", "SIC", "BAS")) %>% pull(id) %>% unique()
 chem_phys %>% dplyr::filter(id %in% ids) %>% 
-dplyr::select(-c(O_dev)) %>%
+dplyr::filter(NP_tot < 1000) %>%
 pivot_longer(
   cols = c("NH4", "NO3", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "TRIX", "NP_tot", "DO", "DIN"),
   names_to = "Variable",
   values_to = "Value"
 ) %>% 
 merge(
-    sample_abund %>% dplyr::select(Date, id, Transect)
+    sample_abund %>% dplyr::select(id, Transect), 
+    by = c("id")
 ) %>% 
 mutate(id = factor(id, levels = params$ordered_id[params$ordered_id %in% ids], ordered = TRUE)) %>%
 ggplot() + 
 geom_boxplot(aes(x = id, y = Value, fill = Transect)) + 
 facet_wrap(~ Variable, scales = "free")
 
-
-chem_phys %>% dplyr::filter(id %in% cam_ids) %>% 
-dplyr::select(all_of(c("id", "Date", "NH4", "NO3", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "TRIX", "NP_tot", "DO", "DIN", "SeaDepth"))) %>% 
-merge(
-    sample_abund %>% dplyr::select(Date, id, sample_abund, Transect), 
-    by = c("Date", "id")
-) %>% 
+ids <- phyto_abund %>% dplyr::filter(Region %in% c("CAL", "SIC", "EMR")) %>% pull(id) %>% unique()
+chem_phys %>% dplyr::filter(id %in% ids) %>% 
 pivot_longer(
-    cols = -all_of(c("Date", "id", "sample_abund", "Transect")),
-    names_to = "Variable",
-    values_to = "Value"
-) %>% ggplot() + 
-geom_point(aes(x = Value, y = log10(sample_abund), col = Transect)) +
-facet_wrap(~ Variable, scales = "free")
+  cols = c("T", "Chla"),
+  names_to = "Variable",
+  values_to = "Value"
+) %>% 
+merge(
+    sample_abund %>% dplyr::select(id, Transect), 
+    by = c("id")
+) %>% 
+mutate(id = factor(id, levels = params$ordered_id[params$ordered_id %in% ids], ordered = TRUE)) %>%
+ggplot() + 
+geom_boxplot(aes(x = id, y = Value, fill = Transect)) + 
+facet_wrap(~ Variable, scales = "free") 
 
 
+chem_phys %>% 
+mutate(Month = format(as.Date(Date), "%m"), 
+        Year_month = format(as.Date(Date), "%Y-%m")) %>%
+merge(
+    abund_groups %>% 
+mutate(Month = format(as.Date(Date), "%m"), 
+        Year_month = format(as.Date(Date), "%Y-%m")) %>%
+pivot_wider(
+    names_from = Group, 
+    values_from = Abund, 
+    values_fill = 0
+) %>% mutate(
+    DIA_DIN = DIA / DIN
+),
+    by = c("Date", "id")
+) %>%
+ggplot() + 
+geom_point(aes(log10(NO3), y = log10(DIA_DIN))) + 
+facet_wrap(~Region, scales = "free")
+
+abund_groups %>% colnames()
 
 cleaned_data <- data_fit %>% 
     na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
@@ -367,7 +433,17 @@ facet_wrap(~Season, scales = "free")
 
 
 
+plot_variable_along_coast(
+    data = chem_phys, 
+    var = "TRIX", 
+    group = "Region", 
+    title = "TRIX across all stations", 
+    ylab = "TRIX index", 
+    ordered_latitude = ordered_latitude, 
+    ordered_longitude = ordered_longitude
+)
 
+chem_phys %>% pull(TRIX)
 regression_plot_region(data_fit, "Chla")
 regression_plot_region(data_fit, "DO")
 regression_plot_region(data_fit, "O_sat")

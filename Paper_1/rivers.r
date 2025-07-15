@@ -40,17 +40,26 @@ stations <- stations %>% group_by(Transect) %>%
         .groups = "drop"
     )
 
+library(ggrepel)
 ggplot() + 
 geom_sf(data = italy, fill = "lightgrey", color = "black") + 
 geom_point(data = stations, aes(x = Longitude, y = Latitude), color = "blue", size = 2) + 
-geom_text(data = stations %>% group_by(Transect) %>% 
+geom_text_repel(
+  data = stations %>% group_by(Transect) %>% 
     summarise(
-        Longitude = mean(Longitude, na.rm = TRUE),
-        Latitude = mean(Latitude, na.rm = TRUE), 
-        .groups = "drop"
-    ), aes(x = Longitude, y = Latitude, label = Transect), hjust = 0.5, vjust = -0.1, size = 3) +
+      Longitude = mean(Longitude, na.rm = TRUE),
+      Latitude = mean(Latitude, na.rm = TRUE), 
+      .groups = "drop"
+    ),
+  aes(x = Longitude, y = Latitude, label = Transect),
+  size = 3
+) +
 geom_point(data = rivers_mouths, aes(x = lon_mouth, y = lat_mouth), color = "red", size = 1) +
-geom_text(data = rivers_mouths, aes(x = lon_mouth, y = lat_mouth, label = rivername), hjust = 1.5, vjust = -0.5, size = 3) +
+geom_text_repel(
+  data = rivers_mouths,
+  aes(x = lon_mouth, y = lat_mouth, label = rivername),
+  size = 3
+) +
 labs(title = "Stations and Rivers Mouths",
      x = "Longitude",
      y = "Latitude") +
@@ -90,20 +99,29 @@ for (i in seq_along(length(stations$id))) {
   }
 }
 
-# Compute distance from Po river for stations in EMR
-# Filter Po river mouth
-cam_stations <- phyto_abund %>% dplyr::filter(Region == "CAM") %>% dplyr::distinct(id, Longitude, Latitude)
 
+reg_stations <- phyto_abund %>% dplyr::filter(Region == "PUG") %>% dplyr::distinct(id, Longitude, Latitude)
+reg_stations
 # Convert to sf objects for distance calculation
-cam_sf <- st_as_sf(cam_stations, coords = c("Longitude", "Latitude"), crs = 4326)
+reg_sf <- st_as_sf(reg_stations, coords = c("Longitude", "Latitude"), crs = 4326)
 rivers_sf <- st_as_sf(rivers_mouths, coords = c("lon_mouth", "lat_mouth"), crs = 4326)
 
 # Find nearest river for each CAM station
-nearest_river_idx <- st_nearest_feature(cam_sf, rivers_sf)
-cam_sf$nearest_river <- rivers_mouths$rivername[nearest_river_idx]
-cam_sf$riv_dist <- as.numeric(st_distance(cam_sf, rivers_sf[nearest_river_idx, ], by_element = TRUE) / 1000)
+nearest_river_idx <- st_nearest_feature(reg_sf, rivers_sf)
+reg_sf$nearest_river <- rivers_mouths$rivername[nearest_river_idx]
+reg_sf$riv_dist <- as.numeric(st_distance(reg_sf, rivers_sf[nearest_river_idx, ], by_element = TRUE) / 1000)
 
+riv_dis <- reg_sf %>% as.data.frame() %>% 
+merge(
+  rivers %>% dplyr::select(rivername, `MEAN_2011_2023.m3s-1`), 
+  by.x = "nearest_river",
+  by.y = "rivername"
+) %>% 
+mutate(
+  riv_discharge = `MEAN_2011_2023.m3s-1` / riv_dist ^ 2
+) 
 
+sample_abund %>% dplyr::filter(Transect %in% c("Cilento", "Salerno")) %>% pull(id) %>% unique()
 
 phyto_abund %>% dplyr::filter(Region == "CAM") %>% 
 dplyr::group_by(Date, id) %>% 
@@ -123,3 +141,24 @@ lm(
   log10(sample_abund) ~ riv_dist, 
   data = .
 ) %>% summary()
+
+# Compute distance from each station in reg_stations to Tevere river mouth
+tevere_mouth <- rivers_mouths %>% filter(rivername == "Tevere")
+tevere_sf <- st_as_sf(tevere_mouth, coords = c("lon_mouth", "lat_mouth"), crs = 4326)
+
+reg_stations$tevere_dist_km <- as.numeric(st_distance(reg_sf, tevere_sf[rep(1, nrow(reg_sf)), ], by_element = TRUE) / 1000)
+reg_stations$tevere_dist_km <- as.numeric(st_distance(reg_sf, tevere_sf, by_element = TRUE) / 1000)
+reg_stations
+
+
+library(stringr)
+chem_phys %>% filter(str_detect(id, "IT_m1rm03"))
+
+chem_phys %>% merge(
+  sample_abund %>% dplyr::select(id, Transect, Region),
+  by = "id"
+) %>% dplyr::select(Region == "LAZ") %>% pull(id) %>% unique()
+
+ids <- phyto_abund %>% dplyr::filter(Region == "LAZ") %>% pull(id) %>% unique()
+
+ids
