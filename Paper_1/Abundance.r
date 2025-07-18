@@ -27,31 +27,37 @@ ggplot_theme <- ggplot2::theme_bw() +
     ) 
 
 
-phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
+sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
+params <- fromJSON(file = file.path(HOME_, "params.json"))
+
+phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
+merge(
+    sea_depth %>% select(id, Transect,SeaDepth)
+)
+phyto_abund$Region <- from_region_to_abreviation[as.character(phyto_abund$Region)]
+phyto_abund$Transect <- factor(phyto_abund$Transect, levels = ordered_transect, ordered = TRUE)
 phyto_abund <- phyto_abund %>% mutate(
-    New_basin = case_when(
+    Basin = case_when(
         Region %in% c("FVG", "VEN", "EMR") ~ "NA",
         Region %in% c("MAR", "ABR") ~ "CA", 
         Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Transect %in% c("FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO") ~ "SA",
+        Transect %in% c("PORTO_CESAREO", "PUNTA_RONDINELLA") ~ "SM",
         Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Transect %in% c("Villapiana", "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche") ~ "SM",
         Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Transect %in% c("Vibo_marina", "Cetraro") ~ "ST",
         Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Transect %in% c("m1lt01", "m1lt02") ~ "ST",
+        Transect %in% c("m1rm03", "m1vt04") ~ "NT",
         Region == "TOS" ~ "NT",
         Region == "LIG" ~ "LIG",
         Region == "SAR" ~ "SAR"
     )
 )
-phyto_abund$New_basin <- factor(phyto_abund$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
+phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
-sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
 
-params <- fromJSON(file = file.path(HOME_, "params.json"))
 
 abund <- phyto_abund %>%
     group_by(Date, id) %>%
@@ -78,7 +84,7 @@ abund$New_basin <- factor(abund$New_basin, levels = c("NA", "CA", "SA", "SM", "S
 abund <- abund %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) 
 
 
-abund_groups <- process_abund_groups(phyto_abund)
+
 
 
 ordered_latitude <- abund %>% dplyr::select(id, Latitude) %>% distinct() %>% 
@@ -132,7 +138,19 @@ pairwise.wilcox.test(abund %>% dplyr::filter(New_basin == basin) %>% pull(Abund)
 abund %>% dplyr::filter(New_basin == basin) %>% pull(Season), p.adjust.method = "BH")
 
 
+phyto_abund %>% dplyr::filter(grepl("Other", Taxon)) %>% 
+group_by(Region, Season, Taxon) %>% 
+summarise(
+    mean_abund = mean(Num_cell_l, na.rm = TRUE),
+    median_abund = median(Num_cell_l, na.rm = TRUE),
+    .groups = "drop"
+) %>% ggplot() + 
+geom_bar(aes(x = Taxon, y = mean_abund, fill = Season), stat = "identity", position = "dodge") +
+facet_wrap(~Region, ncol = 2) +
+scale_y_log10() 
 
+
+abund_groups <- process_abund_groups(phyto_abund)
 
 abund_groups %>% 
 mutate(Month = format(as.Date(Date), "%m"), 
@@ -145,19 +163,19 @@ pivot_wider(
     DIA_DIN = DIA / DIN
 ) %>% ggplot() + 
 geom_boxplot(aes(x = Year_month, y = log10(DIA_DIN), fill = Season))# + 
-facet_wrap(~New_basin, ncol = 2)
+facet_wrap(~Basin, ncol = 2)
 
-p <- abund_groups %>% group_by(Season, New_basin, Group) %>%
+p <- abund_groups %>% group_by(Season, Basin, Group) %>%
 summarise(
     Abund = quantile(Abund, 0.75),
     .groups = "drop"
-) %>% complete(Group, nesting(Season, New_basin), fill = list(Abund = 0)) %>% 
+) %>% complete(Group, nesting(Season, Basin), fill = list(Abund = 0)) %>% 
 ggplot(aes(x = Group, y = Season, fill = log10(Abund +1))) +
 geom_tile(color = "gray", linewidth = 0.5) +
 geom_text(aes(label = sciencific_notation(Abund), colour = ifelse(Abund > 1e4, "black", "white")),
 size = 8) +
 scale_y_discrete(limits = rev) + 
-facet_grid(New_basin ~ ., scale = "free_y") +
+facet_grid(Basin ~ ., scale = "free_y") +
 labs(title = "Distribution of abundance of main phytoplankton groups", y = "Season", x = "Group") +
 ggplot_theme + theme(legend.position = "bottom") +
 ggplot_fill_scale(c(2, 6), "Abundance [cell/L] (log scale)") 
@@ -169,59 +187,21 @@ ggsave(
     dpi = 300
 )
 
-p <- abund_groups %>% 
-mutate(
-    Group = case_when(
-        higher_group == "Dinoflagellata" ~ "DIN",
-        higher_group == "Bacillariophyceae" ~ "DIA",
-        higher_group == "Coccolithophyceae" ~ "COC",
-        higher_group == "Cryptophyceae" ~ "CRY",
-        higher_group != "Unknown" ~ "Else",
-        higher_group == "Unknown" ~ "UNK"
-    )
-) %>% group_by(Season, New_basin, Group) %>%
-summarise(
-    Abund = quantile(Abund, 0.75),
-    .groups = "drop"
-) %>% ggplot(aes(x = Group, y = Season, size = log10(Abund +1), color = log10(Abund +1))) +
-geom_point()+
-scale_size(range = c(1, 6), "Abundance [cell/L] (log scale)") + 
-scale_y_discrete(limits = rev) + 
-facet_wrap(~New_basin, ncol = 1) +
-labs(title = "Distribution of abundance of main phytoplankton groups", y = "Season", x = "Group") +
-ggplot_theme + theme(legend.position = "bottom")# +
-p
-ggsave(
-    file.path(HOME_, "abundance_per_group_bubbleplot.svg"), 
-    p, 
-    width = 9, 
-    height = 16, 
-    dpi = 300
-)
 
 
-p <- abund_groups %>% 
-mutate(
-    Group = case_when(
-        higher_group == "Dinoflagellata" ~ "DIN",
-        higher_group == "Bacillariophyceae" ~ "DIA",
-        higher_group == "Coccolithophyceae" ~ "COC",
-        higher_group == "Cryptophyceae" ~ "CRY",
-        higher_group != "Unknown" ~ "Else",
-        higher_group == "Unknown" ~ "UNK"
-    )
-) %>% group_by(Season, New_basin, Group) %>%
+p <- abund_groups %>% group_by(Season, Basin, Group) %>%
 summarise(
     Abund = mean(Abund),
     .groups = "drop"
-) %>% group_by(Season, New_basin) %>% 
+) %>% group_by(Season, Basin) %>% 
 mutate(Rel_abund = Abund / sum(Abund)) %>% 
 ggplot(aes(y = Season, x = Rel_abund, fill = Group)) +
 geom_bar(stat = "identity") +
-facet_wrap(~New_basin, ncol = 1) +
+facet_wrap(~Basin, ncol = 1) +
 scale_y_discrete(limits = rev) + 
 labs(title = "Distribution of abundance of main phytoplankton groups", y = "Season", x = "Relative abundance") +
 ggplot_theme  
+p
 ggsave(
     file.path(HOME_, "abundance_per_group_barplot.svg"), 
     p, 

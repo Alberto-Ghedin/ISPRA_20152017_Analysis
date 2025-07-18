@@ -213,7 +213,9 @@ process_abund_groups <- function(phyto_abund) {
         higher_group = case_when(
             Class == "Dinoflagellata incertae sedis" ~ "Dinoflagellata",
             Taxon == "Noctilucea" ~ "Dinoflagellata",
-            Class == "nan" ~ "Unknown", 
+            Taxon == "Other phytoplankton (inf. 20µm)" ~ "Unknown < 20µm", 
+            Taxon == "Other phytoplankton (sup. 20µm)" ~ "Unknown > 20µm",
+            Taxon == "Other phytoplankton" ~ "Unknown",
             Class == "Dinophyceae" ~ "Dinoflagellata", 
             TRUE ~ Class
         )
@@ -231,20 +233,32 @@ process_abund_groups <- function(phyto_abund) {
             higher_group == "Bacillariophyceae" ~ "DIA",
             higher_group == "Coccolithophyceae" ~ "COC",
             higher_group == "Cryptophyceae" ~ "CRY",
-            higher_group != "Unknown" ~ "Else",
-            higher_group == "Unknown" ~ "UNK"
+            higher_group == "Unknown" ~ "UNK",
+            higher_group == "Unknown < 20µm" ~ "UNK < 20µm",
+            higher_group == "Unknown > 20µm" ~ "UNK > 20µm",
+            TRUE ~ "ELSE"
         )
     ) %>% group_by(Date, id, Group) %>%
     summarise(
         Abund = sum(Abund),
         Region = first(Region),
         Season = first(Season),
-        New_basin = first(New_basin),
+        Basin = first(Basin),
         .groups = "drop"
     )
     abund_groups$Region <- factor(abund_groups$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
     abund_groups$Season <- factor(abund_groups$Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)
-    abund_groups$New_basin <- factor(abund_groups$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
+    abund_groups$Basin <- factor(abund_groups$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
     return(abund_groups)
 }
 
+order_species <- function(df, basins, threshold = 0.5) {
+    characteristic_species <- df$Taxon[apply(df[, basins], 1, function(x) any(x >= threshold))]
+    df_long <- reshape2::melt(df[, c("Taxon", basins)] %>% dplyr::filter(Taxon %in% characteristic_species), id.vars = "Taxon", variable.name = "Basin", value.name = "Value")
+    df_long$Basin <- factor(df_long$Basin, levels = basins, ordered = TRUE)
+    ordered_ids <- df_long %>%
+    group_by(Taxon) %>%
+    summarise(Max_Basin = Basin[which.max(Value)], Max_Value = max(Value)) %>%
+    arrange(Max_Basin, desc(Max_Value)) %>% pull(Taxon)
+    return(ordered_ids)
+}

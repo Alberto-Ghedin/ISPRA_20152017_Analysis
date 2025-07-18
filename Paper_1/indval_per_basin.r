@@ -12,17 +12,9 @@ library(colorBlindness)
 library(ComplexHeatmap)
 library(circlize)
 
-order_species <- function(df, basins, threshold = 0.5) {
-    characteristic_species <- df$Taxon[apply(df[, basins], 1, function(x) any(x >= threshold))]
-    df_long <- reshape2::melt(df[, c("Taxon", basins)] %>% dplyr::filter(Taxon %in% characteristic_species), id.vars = "Taxon", variable.name = "Basin", value.name = "Value")
-    df_long$Basin <- factor(df_long$Basin, levels = basins, ordered = TRUE)
-    ordered_ids <- df_long %>%
-    group_by(Taxon) %>%
-    summarise(Max_Basin = Basin[which.max(Value)], Max_Value = max(Value)) %>%
-    arrange(Max_Basin, desc(Max_Value)) %>% pull(Taxon)
-    return(ordered_ids)
-}
-
+HOME_ <- "./Paper_1"
+IMAGE_FORMAT <- "svg"
+source(file.path(HOME_, "utils.r"))
 
 plot_indval <- function(df, basins, threshold, title) {
     taxa_list <- order_species(df, basins, threshold = 0)
@@ -193,29 +185,34 @@ save_heatmap <- function(ht, filename, format = "pdf", width = 6, height = 5, re
 HOME_ <- "./Paper_1"
 IMAGE_FORMAT <- "svg"
 
-phyto_abund <- read.csv(paste(HOME_, "phyto_abund.csv", sep = "/")) 
-id_basin <- phyto_abund %>% dplyr::select(id, Basin) %>% distinct() %>% column_to_rownames("id")
-ordered_basins <- c("NorthAdr", "SouthAdr", "Ion", "SouthTyr", "NorthTyr", "WestMed")
-phyto_abund <- phyto_abund %>% 
-mutate(
-    New_basin = case_when(
+sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
+params <- fromJSON(file = file.path(HOME_, "params.json"))
+phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
+merge(
+    sea_depth %>% select(id, Transect,SeaDepth)
+)
+phyto_abund$Region <- from_region_to_abreviation[as.character(phyto_abund$Region)]
+phyto_abund$Transect <- factor(phyto_abund$Transect, levels = ordered_transect, ordered = TRUE)
+phyto_abund <- phyto_abund %>% mutate(
+    Basin = case_when(
         Region %in% c("FVG", "VEN", "EMR") ~ "NA",
         Region %in% c("MAR", "ABR") ~ "CA", 
         Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Transect %in% c("FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO") ~ "SA",
+        Transect %in% c("PORTO_CESAREO", "PUNTA_RONDINELLA") ~ "SM",
         Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Transect %in% c("Villapiana", "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche") ~ "SM",
         Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Transect %in% c("Vibo_marina", "Cetraro") ~ "ST",
         Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Transect %in% c("m1lt01", "m1lt02") ~ "ST",
+        Transect %in% c("m1rm03", "m1vt04") ~ "NT",
         Region == "TOS" ~ "NT",
         Region == "LIG" ~ "LIG",
         Region == "SAR" ~ "SAR"
     )
 )
+phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
 
 result <- multipatt(
@@ -365,12 +362,12 @@ write.xlsx(result_per_basin, paste(HOME_, "indval_only_genera_log2_per_basin.xls
 
 
 sheets <- getSheetNames(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"))
-all_data <- sapply(sheets, function(sheet) {
+IndVal <- sapply(sheets, function(sheet) {
     data <- read.xlsx(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"), sheet = sheet)
     colnames(data)[1] <- "Taxon"
     return(data)
 }, simplify = FALSE)
-names(all_data) <- sheets
+names(IndVal) <- sheets
 
 
 plots <- mapply(
@@ -446,6 +443,8 @@ mapply(
     plots,
     names(plots)
 )
+
+
 
 
 ha_right_complete <- rowAnnotation(

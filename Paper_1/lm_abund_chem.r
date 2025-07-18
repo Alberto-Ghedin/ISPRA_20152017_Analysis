@@ -111,7 +111,7 @@ chem_phys <- chem_phys %>% mutate(
 )
 
 
-chem_phys <- chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla)) %>%
+chem_phys <- chem_phys %>% dplyr::select(-c(E_cond, Secchi_depth, NO2)) %>%
 dplyr::filter(
   DO < 400 | is.na(DO), 
   NH4 < 10 | is.na(NH4),
@@ -123,36 +123,18 @@ dplyr::filter(
   SiO4 < 40 | is.na(SiO4), 
   TN < 120 | is.na(TN), 
   NP_tot < 204 | is.na(NP_tot)
-  ) %>% 
-chem_phys$TRIX <- compute_TRIX(chem_phys)
-merge(
-  phyto_abund %>% dplyr::distinct(id, Date, Closest_coast, SeaDepth, Season, New_basin), 
+  ) %>% merge(
+  phyto_abund %>% dplyr::distinct(id, Date, Closest_coast, SeaDepth, Season, Basin), 
   by = c("Date", "id")
 ) 
+chem_phys$TRIX <- compute_TRIX(chem_phys)
+
 
 vars_to_transform <- c("NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "NP_tot", "pH")
 chem_phys <- chem_phys %>% mutate(across(all_of(vars_to_transform), boxcox_transform)) %>% 
 dplyr::select(-c(O_sat, NP)) %>%
 na.omit() %>% 
 dplyr::filter(if_all(where(is.numeric), ~ is.finite(.))) 
-
-
-ids <- phyto_abund %>% dplyr::filter(Region %in% c("CAL", "SIC", "BAS")) %>% pull(id) %>% unique()
-chem_phys %>% dplyr::filter(id %in% ids) %>% 
-dplyr::filter(NP_tot < 1000) %>%
-pivot_longer(
-  cols = c("NH4", "NO3", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "TRIX", "NP_tot", "DO", "DIN"),
-  names_to = "Variable",
-  values_to = "Value"
-) %>% 
-merge(
-    sample_abund %>% dplyr::select(id, Transect), 
-    by = c("id")
-) %>% 
-mutate(id = factor(id, levels = params$ordered_id[params$ordered_id %in% ids], ordered = TRUE)) %>%
-ggplot() + 
-geom_boxplot(aes(x = id, y = Value, fill = Transect)) + 
-facet_wrap(~ Variable, scales = "free")
 
 
 plot_variable_along_coast(
