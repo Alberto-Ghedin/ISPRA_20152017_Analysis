@@ -3,10 +3,13 @@ library(ggplot2)
 library(openxlsx)
 library(dplyr)
 library(tidyr)
-library(pals)
-library(jsonlite)
+#library(pals)
+library(rjson)
 library(gridExtra)
 library(scales)
+
+HOME_ <- "./Paper_1"
+IMG_FORMAT <- "svg"
 
 capitalize_first <- function(string) {
   paste0(toupper(substring(string, 1, 1)), substring(string, 2))
@@ -55,7 +58,7 @@ make_raref_plot_richness <- function(acc_curve, plot_title, taxon_level = "Taxa"
 }
 
 # Load data
-HOME_ <- "."
+HOME_ <- "./Paper_1"
 IMAGE_FORMAT <- "pdf"
 
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
@@ -200,11 +203,10 @@ p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Region)) +
       legend.margin=margin(0,0,0,0),
       legend.box.margin=margin(t = -10)
     )
-plot_title <- paste("acc_curve_all_regions_genera_species_bar", IMAGE_FORMAT, sep = ".")
+plot_title <- paste("acc_curve_all_regions_genera_species_bar", IMG_FORMAT, sep = ".")
 ggsave(
   paste(HOME_, plot_title, sep = "/"), 
   p,
-  device = IMAGE_FORMAT, 
   width = 15, 
   height = 10
   )
@@ -245,7 +247,7 @@ p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Region)) +
       legend.box.margin=margin(t = -10)
     )
 p
-plot_title <- "acc_curve_all_regions_genera_species_bar.pdf"
+plot_title <- paste("acc_curve_all_regions_genera_species_bar", IMG_FORMAT, sep = ".")
 ggsave(paste(HOME_, plot_title, sep = "/"), p, width = 15, height = 10)
 
 phyto_abund %>% dplyr::filter(Det_level == "Unknown") %>% group_by(Region) %>% 
@@ -335,7 +337,7 @@ p <- ggplot(acculumated_richness %>% arrange(desc(Level)), aes(x = Basin)) +
       legend.margin=margin(0,0,0,0),
       legend.box.margin=margin(t = -10)
     )
-plot_title <- "acc_curve_all_basins_genera_species_bar.pdf"
+plot_title <- paste("acc_curve_all_basins_genera_species_bar", IMG_FORMAT, sep = ".")
 ggsave(paste(HOME_, plot_title, sep = "/"), p, width = 15, height = 10)
 
 
@@ -372,7 +374,6 @@ p <- ggplot(acculumated_richness) +
 ggsave(
   paste(HOME_, "acc_curve_all_regions_genera_species_bar_per_coast_length.pdf", sep = "/"), 
   p, 
-  device = "pdf",
   width = 15, 
   height = 10
 )
@@ -419,7 +420,6 @@ theme(
 ggsave(
   paste(HOME_, "acc_curve_all_regions_genera_species_vs_unknown_contribution.pdf", sep = "/"), 
   p, 
-  device = "pdf",
   width = 15, 
   height = 10
 )

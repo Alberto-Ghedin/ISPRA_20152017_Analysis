@@ -13,7 +13,7 @@ library(ComplexHeatmap)
 library(circlize)
 
 HOME_ <- "./Paper_1"
-IMAGE_FORMAT <- "svg"
+IMAGE_FORMAT <- "pdf"
 source(file.path(HOME_, "utils.r"))
 
 plot_indval <- function(df, basins, threshold, title) {
@@ -182,8 +182,6 @@ save_heatmap <- function(ht, filename, format = "pdf", width = 6, height = 5, re
   dev.off()
 }
 
-HOME_ <- "./Paper_1"
-IMAGE_FORMAT <- "svg"
 
 sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
 params <- fromJSON(file = file.path(HOME_, "params.json"))
@@ -369,32 +367,7 @@ IndVal <- sapply(sheets, function(sheet) {
 }, simplify = FALSE)
 names(IndVal) <- sheets
 
-
-plots <- mapply(
-    function(df, basin) {
-        p <- plot_indval(df %>% mutate(across(where(is.numeric), ~ .^2)), c("Winter", "Spring", "Summer", "Autumn"), 0.25, title = paste("Characteristic species in ", basin, sep = ""))
-    }, 
-    all_data, 
-    names(all_data)
-)
-
-
-indval_path <- paste(HOME_, "IndVal", sep = "/")
-dir.create(indval_path, showWarnings = FALSE)
-mapply(
-    function(p, basin) {
-        ggsave(
-            p, 
-            file = file.path(indval_path, paste(paste("indval_per_basin_", basin, sep = ""), IMAGE_FORMAT, sep = ".")),
-            width = 18, height = 12, dpi = 300
-        )
-    },
-    plots,
-    names(plots)
-)
-
-
-all_taxa <- unique(unlist(lapply(all_data, function(df) df$Taxon))) 
+all_taxa <- unique(unlist(lapply(IndVal, function(df) df$Taxon))) 
 genus_class <- phyto_abund %>% 
     dplyr::filter(Genus %in% all_taxa) %>%
     dplyr::select(Genus, Class) %>% 
@@ -411,8 +384,52 @@ genus_class <- phyto_abund %>%
     ) %>% 
     arrange(Genus) %>%
     distinct()
-
 unique_classes <- unique(genus_class$Class)
+
+
+plots <- mapply(
+    function(df, basin) {
+        p <- plot_indval_CM(
+            df %>% mutate(across(where(is.numeric), ~ .^2)), 
+            c("Winter", "Spring", "Summer", "Autumn"), 
+            0.25, 
+            title = paste("Characteristic species in ", basin, sep = ""), 
+            unique_classes = unique_classes
+            )
+    }, 
+    IndVal, 
+    names(IndVal)
+)
+
+
+indval_path <- paste(HOME_, "IndVal", sep = "/")
+dir.create(indval_path, showWarnings = FALSE)
+mapply(
+    function(p, basin) {
+        ggsave(
+            p, 
+            file = file.path(indval_path, paste(paste("indval_per_basin_", basin, sep = ""), IMAGE_FORMAT, sep = ".")),
+            width = 18, height = 12, dpi = 300
+        )
+    },
+    plots,
+    names(plots)
+)
+mapply(
+    function(p, basin) {
+        save_heatmap(
+            p, 
+            filename = file.path(indval_path, paste(paste("indval_per_basin_", basin, sep = ""), IMAGE_FORMAT, sep = ".")),
+            format = IMAGE_FORMAT,
+            width = 10, height = 12, res = 300
+        )
+    },
+    plots,
+    names(plots)
+)
+
+
+
 
 plots <- mapply(
     function(df, basin) {

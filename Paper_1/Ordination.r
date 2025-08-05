@@ -10,9 +10,12 @@ library(indicspecies)
 library(MASS)
 library(dplyr)
 library(openxlsx)
-
+library(rjson)
 
 IMAGE_FORNMAT <- "svg"
+HOME_ <- "./Paper_1"
+source(file.path(HOME_, "utils.r"))
+
 boxcox_transform <- function(values) {
   
   if (any(is.na(values))) {
@@ -78,66 +81,71 @@ log_trans <- function(x) {
 }
 
 
-HOME_ <- "./Paper_1"
 
 
-phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
-phyto_abund <- phyto_abund %>% 
-mutate(
-    New_basin = case_when(
+
+sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
+params <- fromJSON(file = file.path(HOME_, "params.json"))
+
+phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
+merge(
+    sea_depth %>% dplyr::select(id, Transect,SeaDepth)
+)
+phyto_abund$Region <- from_region_to_abreviation[as.character(phyto_abund$Region)]
+phyto_abund$Transect <- factor(phyto_abund$Transect, levels = ordered_transect, ordered = TRUE)
+phyto_abund <- phyto_abund %>% mutate(
+    Basin = case_when(
         Region %in% c("FVG", "VEN", "EMR") ~ "NA",
         Region %in% c("MAR", "ABR") ~ "CA", 
         Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Transect %in% c("FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO") ~ "SA",
+        Transect %in% c("PORTO_CESAREO", "PUNTA_RONDINELLA") ~ "SM",
         Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Transect %in% c("Villapiana", "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche") ~ "SM",
         Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Transect %in% c("Vibo_marina", "Cetraro") ~ "ST",
         Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Transect %in% c("m1lt01", "m1lt02") ~ "ST",
+        Transect %in% c("m1rm03", "m1vt04") ~ "NT",
         Region == "TOS" ~ "NT",
         Region == "LIG" ~ "LIG",
         Region == "SAR" ~ "SAR"
     )
 )
-
-vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "DIN_TN", "O_sat", "Closest_coast", "SeaDepth")
+phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
 
 chem_phys <- read.csv(paste(HOME_, "df_chem_phys.csv", sep = "/"))
-chem_phys <- compute_TRIX(chem_phys)
+chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
+chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))
+
 chem_phys <- chem_phys %>% mutate(
-                   #  NO_rat = NO2 / NO3, 
-                   #DIN_TN = (NH4 + NO3) / TN,
-                   # P_rat = PO4 / TP, 
                     NP = NO3 / PO4, 
+                    DIN = NO3 + NH4,
                     NP_tot = TN / TP
 )
 
-chem_phys %>% pull(NP_tot) %>% na.omit() %>% quantile(seq(0,1,.1))
 
-vars_to_transform <- c("NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "NP_tot", "pH")
-
-chem_phys <- chem_phys %>% dplyr::select(-c(Region, E_cond, Secchi_depth, NO2, Chla)) %>%
+chem_phys <- chem_phys %>% dplyr::select(-c(E_cond, Secchi_depth, NO2)) %>%
 dplyr::filter(
-  DO < 400, 
-  NH4 < 10,
-  NO3 < 57, 
-  O_sat < 160, 
-  pH > 7, 
-  PO4 < 2, 
-  Salinity > 20, 
-  SiO4 < 40, 
-  TN < 120, 
-  NP_tot < 204
-  ) %>% 
-merge(
-  phyto_abund %>% dplyr::distinct(id, Date, Closest_coast, SeaDepth, Season, New_basin), 
+  DO < 400 | is.na(DO), 
+  NH4 < 10 | is.na(NH4),
+  NO3 < 57 | is.na(NO3), 
+  O_sat < 160 | is.na(O_sat), 
+  pH > 7 | is.na(pH), 
+  PO4 < 2 | is.na(PO4), 
+  Salinity > 20 | is.na(Salinity), 
+  SiO4 < 40 | is.na(SiO4), 
+  TN < 120 | is.na(TN), 
+  NP_tot < 204 | is.na(NP_tot)
+  ) %>% merge(
+  phyto_abund %>% dplyr::distinct(id, Date, Closest_coast, SeaDepth, Season, Basin), 
   by = c("Date", "id")
 ) 
+chem_phys$TRIX <- compute_TRIX(chem_phys)
 
+
+vars_to_transform <- c("NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "NP_tot", "pH")
 chem_phys <- chem_phys %>% mutate(across(all_of(vars_to_transform), boxcox_transform)) %>% 
 dplyr::select(-c(O_sat, NP)) %>%
 na.omit() %>% 
@@ -148,12 +156,12 @@ dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
 
 ##Check env per basin, 
 pca_basins <- sapply(
-  chem_phys %>% pull(New_basin) %>% unique(),
+  chem_phys %>% pull(Basin) %>% unique(),
   function(basin) {
     data <- chem_phys %>% 
     dplyr::select(-c(id, Date, P_rat, Closest_coast, SeaDepth, Season)) %>%
-    dplyr::filter(New_basin == basin) %>% na.omit() %>% 
-    dplyr::select(-New_basin)
+    dplyr::filter(Basin == basin) %>% na.omit() %>% 
+    dplyr::select(-Basin)
     
     return(
       rda(
@@ -164,7 +172,7 @@ pca_basins <- sapply(
   }, 
   simplify = FALSE
 )
-names(pca_basins) <- chem_phys %>% pull(New_basin) %>% unique()
+names(pca_basins) <- chem_phys %>% pull(Basin) %>% unique()
 
 dir.create("./pca_env", showWarnings = FALSE)
 plot_dir <- file.path(HOME_, "pca_env")
@@ -174,7 +182,7 @@ sapply(
     pca <- pca_basins[[basin]]
     sites <- cbind(
       scores(pca, display = "sites"), 
-      chem_phys %>% dplyr::filter(New_basin == basin) %>% dplyr::select(id, Date, Season)
+      chem_phys %>% dplyr::filter(Basin == basin) %>% dplyr::select(id, Date, Season)
     )
     env_arrows <- scores(pca, display = "species")
     perc <- round(100*(summary(pca)$cont$importance[2, 1:2]), 2)
@@ -200,10 +208,6 @@ sapply(
   simplify=FALSE
 )
 
-chem_phys %>% head()
-
-
-
 
 sheets <- getSheetNames(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"))
 all_data <- sapply(sheets, function(sheet) {
@@ -217,7 +221,7 @@ names(all_data) <- sheets
 abund_only_genera <- phyto_abund %>% dplyr::filter(Det_level %in% c("Genus", "Species")) %>% group_by(Date, id, Genus) %>% 
 summarize(
     Abund = sum(Num_cell_l), 
-    Basin = first(New_basin),
+    Basin = first(Basin),
     Season = first(Season),
     .groups = "drop"
 ) %>% pivot_wider(names_from = Genus, values_from = Abund, values_fill = 0)

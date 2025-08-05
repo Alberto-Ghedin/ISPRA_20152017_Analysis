@@ -5,48 +5,43 @@ library(ggrepel)
 library(dplyr)
 library(scales)
 library(ggspatial)
+library(rjson)
 
-IMG_FORMAT <- "svg"
-italy <- st_read("./Italy_shp/Italy.shp")
-surroundings <- st_read("./Surrounding_shp/Surrounding.shp")
-basins <- st_read("./Basins_shp/Basins.shp")
-from_region_to_abbreviation <- list(
-    "Friuli-Venezia-Giulia" = "FVG",
-    "Veneto" = "VEN", 
-    "Emilia-Romagna" = "EMR",
-    "Marche" = "MAR",
-    "Abruzzo" = "ABR",
-    "Molise" = "MOL",
-    "Puglia" = "PUG",
-    "Basilicata" = "BAS",
-    "Calabria" = "CAL",
-    "Campania" = "CAM", 
-    "Lazio" = "LAZ",
-    "Toscana" = "TOS",
-    "Liguria" = "LIG",
-    "Sicilia" = "SIC",
-    "Sardegna" = "SAR"
+IMG_FORMAT <- "pdf"
+HOME_ <- "./Paper_1"
+source(file.path(HOME_, "utils.r"))
+italy <- st_read(paste(HOME_, "Italy_shp/Italy.shp", sep = "/"))
+surroundings <- st_read(paste(HOME_, "Surrounding_shp/Surrounding.shp", sep = "/"))
+basins <- st_read(paste(HOME_, "Basins_shp/Basins.shp", sep = "/"))
+sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
+params <- fromJSON(file = file.path(HOME_, "params.json"))
+
+phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
+merge(
+    sea_depth %>% select(id, Transect,SeaDepth)
 )
-phyto_abund <- read.csv("./phyto_abund.csv") %>% 
-mutate(
+phyto_abund$Region <- from_region_to_abreviation[as.character(phyto_abund$Region)]
+phyto_abund$Transect <- factor(phyto_abund$Transect, levels = ordered_transect, ordered = TRUE)
+phyto_abund <- phyto_abund %>% mutate(
     Basin = case_when(
         Region %in% c("FVG", "VEN", "EMR") ~ "NA",
         Region %in% c("MAR", "ABR") ~ "CA", 
         Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Transect %in% c("FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO") ~ "SA",
+        Transect %in% c("PORTO_CESAREO", "PUNTA_RONDINELLA") ~ "SM",
         Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Transect %in% c("Villapiana", "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche") ~ "SM",
         Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Transect %in% c("Vibo_marina", "Cetraro") ~ "ST",
         Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Transect %in% c("m1lt01", "m1lt02") ~ "ST",
+        Transect %in% c("m1rm03", "m1vt04") ~ "NT",
         Region == "TOS" ~ "NT",
         Region == "LIG" ~ "LIG",
         Region == "SAR" ~ "SAR"
     )
 )
+phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
 basins_centers <- basins
 
@@ -105,13 +100,20 @@ p <- ggplot() +
     style = ggspatial::north_arrow_nautical(
       fill = c("grey40", "white"),
       line_col = "grey20",
-      text_family = "ArcherPro Book"
+      #text_family = "ArcherPro Book"
     )) + 
    annotation_scale(location = "bl", width_hint = 0.2) +
-   geom_point(data = phyto_abund %>% distinct(Longitude, Latitude, Basin), 
-             aes(x = Longitude, y = Latitude, fill = Basin),
-             color = "black", 
-             size = 2, shape = 21, stroke = 0.5) +
+  geom_point(data = phyto_abund %>% distinct(Longitude, Latitude, Basin), 
+         aes(x = Longitude, y = Latitude, fill = Basin),
+         color = "black", 
+         size = 2, shape = 21, stroke = 0.5) +
+  scale_fill_manual(
+    values = setNames(
+      colorBlindness::paletteMartin[c(seq(1, 9, by = 2), seq(2, 8, by = 2))],
+      c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR")
+    ),
+    name = "Basin"
+  ) +
  labs(x = "Longitude", y = "Latitude") +
   theme(
     panel.background = element_rect(fill = "white"),
@@ -122,11 +124,9 @@ p <- ggplot() +
     axis.text = element_text(size = 15),
     axis.title = element_text(size = 15)
   )
-
-
+p
 ggsave(
-    filename = "station_basin_map",
-    device = IMG_FORMAT,
+    filename = paste(HOME_, paste("station_basin_map", IMG_FORMAT, sep = "."), sep = "/"),
     plot = p,
     width = 10,
     height = 10,

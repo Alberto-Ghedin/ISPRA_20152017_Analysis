@@ -8,9 +8,10 @@ library(tidyverse)
 library(rjson)
 library(openxlsx)
 library(colorBlindness)
+library(vegan)
 
 HOME_ <- "./Paper_1"
-IMAGE_FORMAT <- "svg"
+IMAGE_FORMAT <- "pdf"
 source(file.path(HOME_, "utils.r"))
 
 
@@ -64,7 +65,6 @@ abund <- phyto_abund %>%
     summarise(
         Abund = sum(Num_cell_l),
         Basin = first(Basin),
-        New_basin = first(New_basin),
         Region = first(Region), 
         Season = first(Season), 
         Closest_coast = first(Closest_coast),
@@ -80,11 +80,7 @@ abund <- merge(
     sea_depth %>% select(id, SeaDepth, Transect)
 )
 abund$Transect <- factor(abund$Transect, levels = ordered_transect, ordered = TRUE)
-abund$New_basin <- factor(abund$New_basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
-abund <- abund %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) 
-
-
-
+abund$Basin <- factor(abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
 
 ordered_latitude <- abund %>% dplyr::select(id, Latitude) %>% distinct() %>% 
@@ -96,7 +92,7 @@ p <- plot_variable_along_coast(
         Abund = log10(Abund + 1)
     ), 
     var = "Abund", 
-    group = "New_basin", 
+    group = "Region", 
     title = "Sample abundance across all stations", 
     ylab = "Abundance [cells/L] (log scale)", 
     ordered_latitude = ordered_latitude, 
@@ -104,10 +100,10 @@ p <- plot_variable_along_coast(
 )
 
 ggsave(
-    file.path(HOME_, "abundance_per_basin.svg"), 
+    file.path(HOME_, paste("abundance_along_coast_per_region", IMAGE_FORMAT, sep = ".")), 
     p, 
-    width = 18, 
-    height = 8.5, 
+    width = 10, 
+    height = 15, 
     dpi = 300
 )
 
@@ -191,7 +187,7 @@ ggsave(
 
 p <- abund_groups %>% group_by(Season, Basin, Group) %>%
 summarise(
-    Abund = mean(Abund),
+    Abund = median(Abund),
     .groups = "drop"
 ) %>% group_by(Season, Basin) %>% 
 mutate(Rel_abund = Abund / sum(Abund)) %>% 
@@ -199,13 +195,51 @@ ggplot(aes(y = Season, x = Rel_abund, fill = Group)) +
 geom_bar(stat = "identity") +
 facet_wrap(~Basin, ncol = 1) +
 scale_y_discrete(limits = rev) + 
-labs(title = "Distribution of abundance of main phytoplankton groups", y = "Season", x = "Relative abundance") +
+labs(title = "Contribution of main groups \n to total abundance", y = "Season", x = "Relative abundance") +
 ggplot_theme  
 p
 ggsave(
-    file.path(HOME_, "abundance_per_group_barplot.svg"), 
+    file.path(HOME_, "abundance_per_group_barplot.pdf"), 
     p, 
-    width = 9, 
+    width = 10, 
+    height = 16, 
+    dpi = 300
+)
+
+merge(
+    abund_groups %>% pivot_wider(
+    names_from = Group, 
+    values_from = Abund, 
+    values_fill = 0
+) %>% mutate(
+    DIA_DIN = DIA / DIN
+) %>% dplyr::select(Date, id, DIA_DIN, Season), 
+    phyto_abund %>% dplyr::select(Latitude, Longitude, id) %>% distinct(), 
+    by = "id"
+) %>% 
+ggplot() + 
+geom_point(aes(x = Longitude, y = Latitude, col = log10(DIA_DIN), size = log10(DIA_DIN) + 3)) + 
+facet_wrap(~Season, scales = "free") 
+
+
+
+p <- abund_groups %>% pivot_wider(
+    names_from = Group, 
+    values_from = Abund, 
+    values_fill = 0
+) %>% mutate(
+    DIA_DIN = DIA / (DIN + 1)
+) %>% 
+mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)) %>%
+ggplot() + 
+geom_boxplot(aes(y = Season, x = log10(DIA_DIN + 1))) +
+scale_y_discrete(limits = rev) +
+facet_wrap(~Basin, scales = "free_x", ncol = 1)
+
+ggsave(
+    file.path(HOME_, "dia_din_ratio_boxplot.pdf"), 
+    p, 
+    width = 10, 
     height = 16, 
     dpi = 300
 )
@@ -218,40 +252,37 @@ ggsave(
 
 
 
-
-
-
-
 sheets <- getSheetNames(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"))
-all_data <- sapply(sheets, function(sheet) {
+IndVal <- sapply(sheets, function(sheet) {
     data <- openxlsx::read.xlsx(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"), sheet = sheet, colNames = TRUE)
     colnames(data)[1] <- "Taxon"
     data <- data %>% dplyr::filter(Taxon != "Other phytoplankton")
     return(data)
 }, simplify = FALSE)
-names(all_data) <- sheets
+names(IndVal) <- sheets
 
 
+abund_only_genera <- phyto_abund %>% 
+    dplyr::filter(Det_level %in% c("Genus", "Species")) %>%
+    group_by(Date, id, Basin, Genus) %>% 
+    summarise(Abund = sum(Num_cell_l), Season = first(Season), Class = first(Class), .groups = "drop")
 
 
 quantile_abund_genera <- abund_only_genera %>% 
-group_by(Date, id, Basin, Genus) %>% 
-mutate(sample_abund = sum(Abund)) %>%
-group_by(Season, Basin, Genus) %>%
-summarise(
-    Abund =quantile(Abund, 0.5),
+    group_by(Season, Basin, Genus) %>%
+    summarise(
+        Abund =quantile(Abund, 0.5),
     .groups = "drop"
 )
-
 
 dominant_species_path <- paste(HOME_, "Dominant_species", sep = "/")
 dir.create(dominant_species_path, showWarnings = FALSE)
 
 library(patchwork)
 sapply(
-    names(all_data),
+    names(IndVal),
     function(basin) {
-        selected_genera <- all_data[[basin]] %>% rowwise() %>%
+        selected_genera <- IndVal[[basin]] %>% rowwise() %>%
         dplyr::filter(max(c_across(where(is.numeric))) > 0.5) %>%
         ungroup() %>% pull(Taxon)
         dominant_genera <- quantile_abund_genera %>% dplyr::filter(Genus %in% selected_genera & Basin == basin) %>% 
@@ -272,10 +303,10 @@ sapply(
             geom_bar(stat = "identity", linewidth = 0.5, color = "black") + 
             labs(x = "Relative abundance", y = "Season") +
             ggplot_theme + theme(legend.position = "bottom") + 
-            guides(fill = guide_legend(ncol = 3)) + 
+            guides(fill = guide_legend(ncol = 2)) + 
             scale_fill_manual(values = unname(colorBlindness::paletteMartin))
         
-        selected_genera <- all_data[[basin]] %>% rowwise() %>%
+        selected_genera <- IndVal[[basin]] %>% rowwise() %>%
         dplyr::filter(max(c_across(where(is.numeric))) > 0.3) %>%
         ungroup() %>% pull(Taxon)
         sites_genera <- abund_only_genera %>% dplyr::select(
@@ -285,7 +316,7 @@ sapply(
             values_from = Abund, 
             values_fill = 0
         )
-        Shannon_index <- sites_genera %>% dplyr::select(where(is.numeric)) %>% diversity()
+        Shannon_index <- sites_genera %>% dplyr::select(where(is.numeric)) %>% vegan::diversity()
         Pielou_even <- Shannon_index / log(specnumber(sites_genera %>% dplyr::select(where(is.numeric))))
         even <- cbind(
             sites_genera %>% dplyr::select(Date, id, Basin, Season),
@@ -306,17 +337,33 @@ sapply(
                 axis.title.x = element_text(size = 22),
             )
         
+        #+ evenness_plot + plot_layout(ncol = 2, widths = c(0.5, 0.5))
         ggsave(
-            file.path(dominant_species_path, basin),
-            device = IMAGE_FORMAT, 
-            barplot + evenness_plot + plot_layout(ncol = 2, widths = c(0.5, 0.5)), 
-            width = 15, 
+            paste(file.path(dominant_species_path, basin), IMAGE_FORMAT, sep = "."),
+            barplot , 
+            width = 10, 
             height = 10, 
             dpi = 300
         )
     }
 )
 
+phyto_abund %>% dplyr::filter(Basin == "SAR" & Class == "Cryptophyceae") %>% 
+group_by(Season, Taxon) %>% 
+summarise(
+    abund = mean(Num_cell_l),
+    Class = first(Class),
+    .groups = "drop"
+) %>% arrange(Season, desc(abund)) #%>% filter(Season == "Spring")
+
+
+abund_only_genera %>% dplyr::filter(Basin == "LIG" & Class == "Dinophyceae") %>% 
+group_by(Season, Genus) %>% 
+summarise(
+    abund = mean(Abund),
+    Class = first(Class),
+    .groups = "drop"
+) %>% arrange(desc(abund)) #%>% filter(Genus %in% c("Skeletonema", "Leptocylindrus", "Chaetoceros", "Pseudo-nitzschia", "Asterionellopsis"))
 
 
 

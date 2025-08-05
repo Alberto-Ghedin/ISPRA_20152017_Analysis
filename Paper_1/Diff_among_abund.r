@@ -42,6 +42,13 @@ phyto_abund <- phyto_abund %>% mutate(
 )
 phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
+#are there differences aming regions?
+anova(
+    lm(log10(Num_cell_l + 1) ~ Region, data = phyto_abund)
+)
+
+
+
 chem_phys <- read.csv(paste(HOME_, "df_chem_phys.csv", sep = "/"))
 chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
 chem_phys$Region <- factor(chem_phys$Region, levels = unname(from_region_to_abreviation))

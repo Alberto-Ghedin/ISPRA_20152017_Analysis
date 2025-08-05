@@ -4,29 +4,6 @@ library(tidytext)
 library(ggplot2)
 library(grid)
 
-HOME_ <- "."
-phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
-
-from_region_to_abreviation <- c(
-    "Friuli-Venezia-Giulia" = "FVG",
-    "Veneto" = "VEN", 
-    "Emilia-Romagna" = "EMR",
-    "Marche" = "MAR",
-    "Abruzzo" = "ABR",
-    "Molise" = "MOL",
-    "Puglia" = "PUG",
-    "Basilicata" = "BAS",
-    "Calabria" = "CAL",
-    "Sicilia" = "SIC",
-    "Campania" = "CAM", 
-    "Lazio" = "LAZ",
-    "Toscana" = "TOS",
-    "Liguria" = "LIG",
-    "Sardegna" = "SAR"
-)
-
-ordered_basins <- c("NorthAdr", "SouthAdr", "Ion", "SouthTyr", "NorthTyr", "WestMed")
-
 select_and_order <- function(data, title, n_otu = 10, n_samples = 2220) {
     data <- data[1:n_otu, ]
     data$Frequency <- data$Frequency <- round(data$Frequency / n_samples, 2)
@@ -35,10 +12,38 @@ select_and_order <- function(data, title, n_otu = 10, n_samples = 2220) {
     return(data %>% dplyr::select(Taxon, Frequency, type))
 }
 
-top_taxa <- read.csv("./Taxa_freq_95.csv")
-top_species <- read.csv("./Species_freq_top.csv")
-top_genera <- read.csv("./Genera_freq_top.csv")
-top_classes <- read.csv("./Classes_freq_top.csv") %>% dplyr::filter(Class != 'nan')
+
+HOME_ <- "./Paper_1"
+source(file.path(HOME_, "utils.r"))
+sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
+params <- fromJSON(file = file.path(HOME_, "params.json"))
+
+phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
+merge(
+    sea_depth %>% select(id, Transect,SeaDepth)
+)
+phyto_abund$Region <- from_region_to_abreviation[as.character(phyto_abund$Region)]
+phyto_abund$Transect <- factor(phyto_abund$Transect, levels = ordered_transect, ordered = TRUE)
+phyto_abund <- phyto_abund %>% mutate(
+    Basin = case_when(
+        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
+        Region %in% c("MAR", "ABR") ~ "CA", 
+        Region == "MOL" ~ "SA",
+        Transect %in% c("FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO") ~ "SA",
+        Transect %in% c("PORTO_CESAREO", "PUNTA_RONDINELLA") ~ "SM",
+        Region == "BAS" ~ "SM",
+        Transect %in% c("Villapiana", "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche") ~ "SM",
+        Region == "SIC" ~ "SIC", 
+        Transect %in% c("Vibo_marina", "Cetraro") ~ "ST",
+        Region == "CAM" ~ "ST",
+        Transect %in% c("m1lt01", "m1lt02") ~ "ST",
+        Transect %in% c("m1rm03", "m1vt04") ~ "NT",
+        Region == "TOS" ~ "NT",
+        Region == "LIG" ~ "LIG",
+        Region == "SAR" ~ "SAR"
+    )
+)
+phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
 top_taxa <- phyto_abund %>% group_by(Taxon) %>% summarise(Frequency = n_distinct(Date, id)) %>% dplyr::filter(Taxon != "Other phytoplankton") %>% arrange(desc(Frequency)) 
 top_classes <- phyto_abund %>% group_by(Class) %>% summarise(Frequency = n_distinct(Date, id)) %>% arrange(desc(Frequency)) %>% dplyr::filter(Class != "nan")
@@ -106,13 +111,13 @@ ggsave(
 dev.off()
 
 rich_classes <- phyto_abund %>%
-    filter(Taxon != "Other phytoplankton" & Det_level == "Species") %>%
+    filter(!grepl("Other", Taxon) & Det_level == "Species") %>%
     group_by(Class) %>%
     summarise(n_distinct = n_distinct(Taxon)) %>%
     arrange(desc(n_distinct)) %>% rename(Taxon = Class)
 
 rich_genera <- phyto_abund %>%
-    filter(Taxon != "Other phytoplankton" & Det_level == "Species") %>%
+    filter(!grepl("Other", Taxon) & Det_level == "Species") %>%
     group_by(Genus) %>%
     summarise(n_distinct = n_distinct(Taxon)) %>%
     arrange(desc(n_distinct)) %>% rename(Taxon = Genus)
@@ -162,21 +167,22 @@ grid::grid.text(label = "(b)",
 dev.off()
 ggsave(
     plot_most_common(data %>%  mutate(Taxon = reorder_within(Taxon, n_distinct, within = type))), 
-    file = file.path(HOME_, "top_species_rich_classes_genera.svg"),
+    file = file.path(HOME_, "top_species_rich_classes_genera.pdf"),
     width = 17, height = 6, dpi = 300
 )
 
 cat_contribution <- phyto_abund %>% 
-    group_by(Region, Date, id, Det_level) %>% 
+    group_by(Region, Season, Date, id, Det_level) %>% 
     summarise(Cat_abund = sum(Num_cell_l)) %>%
-    group_by(Region,Det_level) %>%
-    summarise(mean_Abund =mean(Cat_abund)) %>%  group_by(Region, Det_level) %>% 
+    group_by(Region, Season, Det_level) %>%
+    summarise(mean_Abund =mean(Cat_abund)) %>%  group_by(Region, Season, Det_level) %>% 
     summarise(
         tot_abund = sum(mean_Abund)
-    ) %>% group_by(Region) %>%
+    ) %>% group_by(Region, Season) %>%
     mutate(
         rel_cont = tot_abund / sum(tot_abund)
     )
+cat_contribution$Season <- factor(cat_contribution$Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)
 cat_contribution$Det_level <- factor(cat_contribution$Det_level, levels = c("Species", "Genus", "Higher cat.", "Unknown"))
 cat_contribution$Region <- factor(cat_contribution$Region, levels = unname(from_region_to_abreviation), ordered = TRUE)
 
@@ -202,7 +208,8 @@ p <- ggplot(cat_contribution, aes(x = Region, y = rel_cont, fill = Det_level)) +
         #strip.text.x = element_text(size = 16), 
         #strip.text.y = element_text(size = 16), 
         #panel.spacing = unit(1, "lines")
-    ) 
+    ) + 
+    facet_wrap(~ Season, ncol = 2, labeller = label_wrap_gen(multi_line = FALSE))
 p
 ggsave(file.path(HOME_, "relative_abundance_per_region.pdf"), p, width = 22, height = 13, dpi = 300)
 

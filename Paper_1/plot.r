@@ -15,7 +15,7 @@ library(grid)
 library(tidyverse)
 library(paletteer)
 
-HOME_ <- "."
+HOME_ <- "./Paper_1"
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv"))
 
 from_region_to_abreviation <- c(

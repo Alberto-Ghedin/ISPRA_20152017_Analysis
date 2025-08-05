@@ -23,26 +23,33 @@ mems <- sapply(
     simplify = FALSE
     )
 
-
-phyto_abund <- read.csv(paste(HOME_, "phyto_abund.csv", sep = "/")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% mutate(
-    New_basin = case_when(
+phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
+merge(
+    sea_depth %>% dplyr::select(id, Transect,SeaDepth)
+)
+phyto_abund$Region <- from_region_to_abreviation[as.character(phyto_abund$Region)]
+phyto_abund$Transect <- factor(phyto_abund$Transect, levels = ordered_transect, ordered = TRUE)
+phyto_abund <- phyto_abund %>% mutate(
+    Basin = case_when(
         Region %in% c("FVG", "VEN", "EMR") ~ "NA",
         Region %in% c("MAR", "ABR") ~ "CA", 
         Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
+        Transect %in% c("FOCE_CAPOIALE", "FOCE_OFANTO", "BARI_TRULLO", "BRINDISI_CAPOBIANCO") ~ "SA",
+        Transect %in% c("PORTO_CESAREO", "PUNTA_RONDINELLA") ~ "SM",
         Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
+        Transect %in% c("Villapiana", "Capo_Rizzuto", "Caulonia_marina", "Saline_Joniche") ~ "SM",
         Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+        Transect %in% c("Vibo_marina", "Cetraro") ~ "ST",
         Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+        Transect %in% c("m1lt01", "m1lt02") ~ "ST",
+        Transect %in% c("m1rm03", "m1vt04") ~ "NT",
         Region == "TOS" ~ "NT",
         Region == "LIG" ~ "LIG",
         Region == "SAR" ~ "SAR"
     )
-    )
+)
+phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
+
 
 
 sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(
@@ -136,7 +143,19 @@ dplyr::select(-c(O_sat, NP)) %>%
 na.omit() %>% 
 dplyr::filter(if_all(where(is.numeric), ~ is.finite(.))) 
 
+chem_phys %>% colnames()
+vars <- c("NH4", "NO3", "PO4", "SiO4", "Salinity", "T", "TRIX", "NP_tot")
+chem_phys %>%
+dplyr::filter(Region == "SAR") %>%
+merge(phyto_abund %>% dplyr::select(id, Date, Transect), by = c("id", "Date")) %>%
+mutate(id = factor(id, levels = params$ordered_id[which(id %in% params$ordered_id)], ordered = TRUE)) %>%
+dplyr::filter(SiO4 < 5, PO4 < 0.15) %>%
+pivot_longer(cols = all_of(vars), names_to = "Variable", values_to = "Value") %>%
+ggplot() + 
+geom_boxplot(aes(x = id, y = Value, fill = Transect)) + 
+facet_wrap(~Variable, scales = "free")
 
+dev.off()
 plot_variable_along_coast(
     data = chem_phys, 
     var = "TRIX", 
@@ -165,6 +184,88 @@ regression_plot_region(data_fit, "DIN_TN", log_env = FALSE)
 regression_plot_region(data_fit, "P_rat", log_env = FALSE)
 
 
+# Compute 5 quantiles (min, 25%, median, 75%, max) for each variable in vars
+quantiles_df <- sapply(vars, function(v) {
+    quantile(chem_phys[[v]], probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+}) %>% 
+    t() %>% 
+    as.data.frame() %>% 
+    setNames(c("Min", "Q1", "Median", "Q3", "Max")) %>% 
+    tibble::rownames_to_column("Variable")
+
+    # Assign quantile class for each variable's median per season and basin
+    vars <- c("T", "NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "pH", "NP")
+    summary_by_basin_season <- chem_phys %>%
+        mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)) %>%
+        group_by(Basin, Season) %>%
+        summarise(across(all_of(vars), ~ median(., na.rm = TRUE), .names = "median_{.col}")) %>%
+        ungroup()
+
+    # For each variable, assign quantile class based on quantiles_df
+    for (v in vars) {
+        summary_by_basin_season[[paste0(v, "_class")]] <- cut(
+            summary_by_basin_season[[paste0("median_", v)]],
+            breaks = quantiles_df[quantiles_df$Variable == v, c("Min", "Q1", "Median", "Q3", "Max")] %>% as.numeric(),
+            labels = c("1", "2", "3", "4"),
+            include.lowest = TRUE, right = TRUE
+        )
+    }
+
+    data.frame(
+        summary_by_basin_season %>% dplyr::select(Basin, Season, ends_with("_class")),
+        stringsAsFactors = FALSE
+    ) %>% pivot_longer(
+        cols = -c(Basin, Season), 
+        names_to = c("Variable", "Class"), 
+        names_sep = "_", 
+        values_to = "Quantile_Class"
+    ) %>% ggplot() + 
+    geom_tile(aes(x = Variable, y = Basin, fill = Quantile_Class)) +
+    scale_y_discrete(limits = rev) +
+    scale_fill_brewer(palette = "Set1") +
+    facet_wrap(~Season, scales = "free_y")
+
+    # Save the result
+    write.csv(summary_by_basin_season, file.path(HOME_, "median_class_by_basin_season.csv"), row.names = FALSE)
+
+chem_phys %>% colnames()
+vars <- c("T", "NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "pH", "NP")
+chem_phys %>%
+mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)) %>%
+    group_by(Basin, Season) %>%
+    summarise(across(all_of(vars), 
+    list(
+        qt1 = ~ quantile(., 0.25, na.rm = TRUE),
+        median = ~ median(., na.rm = TRUE),
+        qt3 = ~ quantile(., 0.75, na.rm = TRUE),
+        min = ~ min(., na.rm = TRUE),
+        max = ~ max(., na.rm = TRUE)
+        )
+        )
+        ) %>%
+    ungroup() %>% 
+    mutate(across(where(is.numeric), ~ round(., 3))) %>%
+    write.csv(
+        file.path(HOME_, "chem_phys_summary.csv"), 
+        row.names = FALSE
+    )
+
+p<- chem_phys %>%
+mutate(Season = factor(Season, levels = c("Winter", "Spring", "Summer", "Autumn"), ordered = TRUE)) %>%
+ggplot() + 
+geom_boxplot(aes(x = TRIX, y = Season)) +
+scale_y_discrete(limits = rev) + 
+    facet_wrap(~Basin, scales = "free_y", ncol = 1)
+ggsave(
+    file.path(HOME_, paste("TRIX_boxplot", IMAGE_FORMAT, sep = ".")), 
+    p, 
+    width = 10, 
+    height = 18, 
+    dpi = 300
+)
+
+
+print(paste("Correlation between log10(NO3) and log10(NH4):", round(correlation, 3)))
 #Using region, no MEM 
 library(car)
 vars <- c("NH4", "NO3", "DO", "PO4", "SiO4", "Salinity", "TN", "TP", "pH", "T", "Closest_coast")
@@ -316,17 +417,3 @@ labs(fill = "Estimate")
 
 
 
-merge(
-    abund_groups %>% pivot_wider(
-    names_from = Group, 
-    values_from = Abund, 
-    values_fill = 0
-) %>% mutate(
-    DIA_DIN = DIA / DIN
-) %>% dplyr::select(Date, id, DIA_DIN, Season), 
-    phyto_abund %>% dplyr::select(Latitude, Longitude, id) %>% distinct(), 
-    by = "id"
-) %>% 
-ggplot() + 
-geom_point(aes(x = Longitude, y = Latitude, col = log10(DIA_DIN), size = log10(DIA_DIN) + 3)) + 
-facet_wrap(~Season, scales = "free") 

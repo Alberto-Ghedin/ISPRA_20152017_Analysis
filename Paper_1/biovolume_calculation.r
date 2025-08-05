@@ -48,6 +48,11 @@ phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM"
 BV_BM_Classes <- read.csv(file.path(HOME_, "biovolumes_classes.csv")) 
 BV_BM_genera <- read.csv(file.path(HOME_, "biovolumes_genera.csv")) 
 
+
+BV_BM_genera %>% mutate(
+    radius = (3 * meanBV / (4 * pi))^(1/3)
+) %>% dplyr::select(Genus, radius) %>% arrange(radius) %>% head(30)
+
 genus_abund_biovol <- phyto_abund %>% dplyr::filter(Det_level == "Genus") %>% 
     group_by(Date, id, Genus) %>% 
     summarise(
@@ -198,6 +203,13 @@ rbind(
 geom_boxplot(aes(x = Season, y = log10(BM_pg))) + 
 facet_wrap(~Basin, scale = "free_y")
 
+
+genus_abund_biovol %>% head()
+rbind(
+    genus_abund_biovol %>% dplyr::select(Date, id, BV, BM_pg, Region, Season, Basin), 
+    class_abund_biovol %>% dplyr::select(Date, id, BV, BM_pg, Region, Season, Basin), 
+    unk_abund_biovol %>% dplyr::select(Date, id, BV, BM_pg, Region, Season, Basin)
+) %>% head()
 
 #NOT INSIGHTFUL         
 sheets <- getSheetNames(paste(HOME_, "indval_only_genera_per_basin.xlsx", sep = "/"))
