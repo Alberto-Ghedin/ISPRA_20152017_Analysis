@@ -8,8 +8,8 @@ library(rjson)
 library(openxlsx)
 library(colorBlindness)
 
-HOME_ <- "./Paper_1"
-IMAGE_FORMAT <- "svg"
+HOME_ <- "."
+IMAGE_FORMAT <- "pdf"
 source(file.path(HOME_, "utils.r"))
 
 sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
@@ -47,7 +47,76 @@ anova(
     lm(log10(Num_cell_l + 1) ~ Region, data = phyto_abund)
 )
 
+phyto_abund %>% 
+dplyr::filter(
+    Basin == "NT", 
+    Genus %in% c("Chaetoceros"),
+    #Season != "Summer"
+     ) %>% 
+group_by(Date, id) %>% 
+summarise(
+    abund = sum(Num_cell_l, na.rm = TRUE),
+    Season = first(Season), 
+    .groups = "drop"
+) %>% 
+mutate(
+    Season = case_when(
+        Season == "Winter" ~ "Else", 
+        Season == "Spring" ~ "Else",
+        Season == "Summer" ~ "Summer",
+        Season == "Autumn" ~ "Else" 
+    )
+) %>% 
+    lm(log10(abund + 1) ~ Season, data = .) %>% 
+    anova()
 
+phyto_abund %>% 
+dplyr::filter(Basin == "NT", Genus %in% c("Chaetoceros")) %>% 
+group_by(Date, id, Genus) %>% 
+summarise(
+    abund = sum(Num_cell_l, na.rm = TRUE),
+    Season = first(Season), 
+    .groups = "drop"
+) %>% 
+#mutate(
+#    Season = case_when(
+#        Season == "Winter" ~ "Cold", 
+#        Season == "Spring" ~ "Warm",
+#        Season == "Summer" ~ "Warm",
+#        Season == "Autumn" ~ "Cold" 
+#    )
+#) %>% 
+ggplot() + 
+geom_boxplot(aes(x = Season, y = log10(abund + 1), fill = Genus)) 
+
+phyto_abund %>% 
+dplyr::filter(Basin == "ST", Det_level %in% c("Genus", "Species")) %>% 
+group_by(Date, id, Genus) %>% 
+summarise(
+    abund = sum(Num_cell_l, na.rm = TRUE),
+    Season = first(Season), 
+    .groups = "drop"
+) %>% 
+group_by(Season, Genus) %>% 
+summarise(
+    abund = mean(abund, na.rm = TRUE)
+) %>% arrange(desc(abund))
+summarise(
+    abund = first(abund),
+    Genus = first(Genus)
+)
+#mutate(
+#    Season = case_when(
+#        Season == "Winter" ~ "Winter", 
+#        Season == "Spring" ~ "Else",
+#        Season == "Summer" ~ "Else",
+#        Season == "Autumn" ~ "Else" 
+#    )
+#) %>% 
+group_by(Season) %>% 
+    summarise(
+        abund = mean(abund)
+    )
 
 chem_phys <- read.csv(paste(HOME_, "df_chem_phys.csv", sep = "/"))
 chem_phys$Region <- from_region_to_abreviation[chem_phys$Region]
