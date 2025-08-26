@@ -12,7 +12,7 @@ library(colorBlindness)
 library(ComplexHeatmap)
 library(circlize)
 
-HOME_ <- "./Paper_1"
+HOME_ <- "."
 IMAGE_FORMAT <- "pdf"
 source(file.path(HOME_, "utils.r"))
 
@@ -444,6 +444,31 @@ plots <- mapply(
     all_data, 
     names(all_data)
 )
+
+genera_basin <- sapply(
+    names(IndVal), 
+    function(basin) {
+        genera <- order_species(
+            IndVal[[basin]] %>% mutate(across(where(is.numeric), ~ .^2)),
+            c("Winter", "Spring", "Summer", "Autumn"),
+            threshold = 0.25
+        )
+        data.frame(
+            Genus = genera, 
+            basin = basin
+        )
+    }, 
+    simplify = FALSE
+) %>% bind_rows()
+
+genera_basin %>% 
+group_by(Genus) %>% 
+mutate(n = n()) %>%
+arrange(desc(n), Genus) %>% write.csv(
+    file = file.path(HOME_, "characteristic_genera_frequency.csv"), 
+    row.names = FALSE
+)
+
 
 
 indval_path <- paste(HOME_, "IndVal_log2", sep = "/")

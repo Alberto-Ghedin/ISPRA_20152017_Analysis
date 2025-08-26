@@ -51,7 +51,7 @@ basins_centers$geometry <- st_transform(basins$geometry, 3857) %>%
   st_transform(st_crs(basins))
 
 region_centers <- italy %>%
-  filter(region %in% names(from_region_to_abbreviation))
+  filter(region %in% names(from_region_to_abreviation))
 
 region_centers <- region_centers %>%
   mutate(geometry = st_transform(geometry, 3857) %>%
