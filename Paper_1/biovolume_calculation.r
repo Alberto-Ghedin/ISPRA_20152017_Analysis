@@ -10,7 +10,7 @@ library(openxlsx)
 library(colorBlindness)
 
 
-HOME_ <- "./Paper_1"
+HOME_ <- "."
 IMAGE_FORMAT <- "svg"
 source(file.path(HOME_, "utils.r"))
 
@@ -160,7 +160,7 @@ rbind(
         .groups = "drop"
     ) %>% dplyr::select(Date, id , sample_abund)
 ) %>% ggplot() + 
-geom_point(aes(x = log10(BM_pg), y = log10(sample_abund), col = Region), size = 2) + 
+geom_point(aes(y = log10(BM_pg), x = log10(sample_abund), col = Region), size = 2)# + 
 stat_ellipse(aes(x = log10(BM_pg), y = log10(sample_abund), col = Region), level = 0.95, linewidth = 0.5)
 
 rbind(
@@ -179,6 +179,22 @@ rbind(
         by = c("Date", "id")
     ) %>% ggplot() + 
 geom_histogram(aes(x = log10(BM_pg_unk / BM_pg_known), fill = Region)) + 
+facet_wrap(~Season) 
+
+rbind(
+    genus_abund_biovol %>% dplyr::select(Date, id, BV, BM_pg, Region, Season, Basin), 
+    class_abund_biovol %>% dplyr::select(Date, id, BV, BM_pg, Region, Season, Basin), 
+    unk_abund_biovol %>% dplyr::select(Date, id, BV, BM_pg, Region, Season, Basin)
+) %>% group_by(Date, id) %>% 
+    summarise(
+        BV = sum(BV, na.rm = TRUE),
+        BM_pg = sum(BM_pg, na.rm = TRUE),
+        Region = first(Region),
+        Season = first(Season),
+        Basin = first(Basin), 
+        .groups = "drop"
+    ) %>% ggplot() + 
+geom_histogram(aes(x = log10(BM_pg), fill = Region)) #+ 
 facet_wrap(~Season) 
 
 rbind(

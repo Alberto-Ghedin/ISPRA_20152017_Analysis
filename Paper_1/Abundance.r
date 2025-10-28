@@ -10,7 +10,7 @@ library(openxlsx)
 library(colorBlindness)
 library(vegan)
 
-HOME_ <- "./Paper_1"
+HOME_ <- "."
 IMAGE_FORMAT <- "pdf"
 source(file.path(HOME_, "utils.r"))
 
@@ -29,11 +29,12 @@ ggplot_theme <- ggplot2::theme_bw() +
 
 
 sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
+sea_depth %>% select(id, Transect,SeaDepth)
 params <- fromJSON(file = file.path(HOME_, "params.json"))
 
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
 merge(
-    sea_depth %>% select(id, Transect,SeaDepth)
+    sea_depth %>% dplyr::select(id, Transect,SeaDepth)
 )
 phyto_abund$Region <- from_region_to_abreviation[as.character(phyto_abund$Region)]
 phyto_abund$Transect <- factor(phyto_abund$Transect, levels = ordered_transect, ordered = TRUE)
@@ -59,7 +60,6 @@ phyto_abund <- phyto_abund %>% mutate(
 phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
 
-
 abund <- phyto_abund %>%
     group_by(Date, id) %>%
     summarise(
@@ -77,16 +77,17 @@ abund$Basin <- factor(abund$Basin, levels = ordered_basins, ordered = TRUE)
 abund$id <- factor(abund$id, levels = params$ordered_id, ordered = TRUE)
 abund <- merge(
     abund, 
-    sea_depth %>% select(id, SeaDepth, Transect)
+    sea_depth %>% dplyr::select(id, SeaDepth, Transect)
 )
 abund$Transect <- factor(abund$Transect, levels = ordered_transect, ordered = TRUE)
 abund$Basin <- factor(abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
 
+
 ordered_latitude <- abund %>% dplyr::select(id, Latitude) %>% distinct() %>% 
-arrange(id = factor(id, levels = params$ordered_id, ordered = TRUE)) %>% pull(Latitude) %>% round(2)
+arrange(id = factor(id, levels = params$ordered_id, ordered = TRUE)) %>% pull(Latitude) %>% round(2) 
 ordered_longitude <- abund %>% dplyr::select(id, Longitude) %>% distinct() %>%
-arrange(id = factor(id, levels = params$ordered_id, ordered = TRUE)) %>% pull(Longitude) %>% round(2)
+arrange(id = factor(id, levels = params$ordered_id, ordered = TRUE)) %>% pull(Longitude) %>% round(2) 
 p <- plot_variable_along_coast(
     abund %>% mutate(
         Abund = log10(Abund + 1)
@@ -95,17 +96,21 @@ p <- plot_variable_along_coast(
     group = "Region", 
     title = "Sample abundance across all stations", 
     ylab = "Abundance [cells/L] (log scale)", 
-    ordered_latitude = ordered_latitude, 
-    ordered_longitude = ordered_longitude
+    ordered_latitude = rev(ordered_latitude), 
+    ordered_longitude = rev(ordered_longitude), 
+    id_order = rev(params$ordered_id)
 )
+p + coord_flip() 
 
 ggsave(
     file.path(HOME_, paste("abundance_along_coast_per_region", IMAGE_FORMAT, sep = ".")), 
-    p, 
+    p + coord_flip(), 
     width = 10, 
     height = 15, 
     dpi = 300
 )
+
+
 
 
 
@@ -192,17 +197,23 @@ summarise(
 ) %>% group_by(Season, Basin) %>% 
 mutate(Rel_abund = Abund / sum(Abund)) %>% 
 ggplot(aes(y = Season, x = Rel_abund, fill = Group)) +
-geom_bar(stat = "identity") +
+geom_bar(stat = "identity", color = "black") +
 facet_wrap(~Basin, ncol = 1) +
+scale_fill_manual(values = unname(colorBlindness::paletteMartin)) +
 scale_y_discrete(limits = rev) + 
 labs(title = "Contribution of main groups \n to total abundance", y = "Season", x = "Relative abundance") +
-ggplot_theme  
+ggplot_theme  + 
+ggplot2::theme(
+    legend.position = "bottom", 
+    legend.title.position = "top", 
+    legend.title = element_text(size = 25, face = "bold", hjust = 0.5)
+)
 p
 ggsave(
-    file.path(HOME_, "abundance_per_group_barplot.pdf"), 
+    file.path(HOME_, paste("abundance_per_group_barplot", IMAGE_FORMAT, sep = ".")), 
     p, 
-    width = 10, 
-    height = 16, 
+    width = 8, 
+    height = 17, 
     dpi = 300
 )
 
@@ -366,6 +377,20 @@ summarise(
 ) %>% arrange(desc(abund)) #%>% filter(Genus %in% c("Skeletonema", "Leptocylindrus", "Chaetoceros", "Pseudo-nitzschia", "Asterionellopsis"))
 
 
+
+phyto_abund %>% 
+group_by(Region, Season, Basin, Date, id) %>% 
+dplyr::filter(grepl("Dino", Class)) %>% 
+summarise(
+    abund = sum(Num_cell_l),
+    .groups = "drop"
+) %>% 
+mutate(
+    Month = factor(format(as.Date(Date), "%m"), levels = sprintf("%02d", 1:12), ordered = TRUE)
+) %>%
+ggplot() + 
+geom_boxplot(aes(x = Month, y = log10(abund + 1))) + 
+facet_wrap(~Region, scale = "free_y")
 
 library(patchwork)
 species_abund_rich <- phyto_abund %>% mutate(

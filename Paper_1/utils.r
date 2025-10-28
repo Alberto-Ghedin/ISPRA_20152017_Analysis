@@ -4,11 +4,11 @@ one_every_n_item <- function(list, n) {
     )
 }
 
-plot_variable_along_coast <- function(data, var, group, title, ylab, ordered_latitude = ordered_latitude, ordered_longitude = ordered_longitude) {
+plot_variable_along_coast <- function(data, var, group, title, ylab, ordered_latitude = ordered_latitude, ordered_longitude = ordered_longitude, id_order = params$ordered_id) {
     colors <- scales::hue_pal()(length(unique(data[[group]])))
     palette <- setNames(colors, sort(as.character(data[[group]] %>% unique())))
     p <- data %>% 
-    mutate(index_id = match(id, params$ordered_id)) %>% 
+    mutate(index_id = match(id, id_order)) %>% 
     ggplot(aes(x = index_id, y = !!as.symbol(var))) + 
     geom_boxplot(aes(group = id, fill = !!as.symbol(group))) +
     scale_fill_manual(values = palette) + 

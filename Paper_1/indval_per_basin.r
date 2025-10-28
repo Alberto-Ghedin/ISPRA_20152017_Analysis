@@ -95,9 +95,9 @@ plot_indval <- function(df, basins, threshold, title) {
 
 plot_indval_CM <- function(df, basins, threshold, title, unique_classes) {
 
-    taxa_list_complete <- order_species(df, basins = basins, threshold = 0)
-    complete_indval <- df[, c("Taxon", basins)] %>% column_to_rownames("Taxon") %>% as.matrix()
-    complete_indval <- complete_indval[taxa_list_complete, basins] 
+    #taxa_list_complete <- order_species(df, basins = basins, threshold = 0)
+    #complete_indval <- df[, c("Taxon", basins)] %>% column_to_rownames("Taxon") %>% as.matrix()
+    #complete_indval <- complete_indval[taxa_list_complete, basins] 
 
     taxa_list_partial <- order_species(df, basins, threshold = threshold)
     partial_indval <- df[, c("Taxon", basins)] %>% column_to_rownames("Taxon") %>% as.matrix()
@@ -110,11 +110,14 @@ plot_indval_CM <- function(df, basins, threshold, title, unique_classes) {
       Class = genus_class$Class[match(rownames(partial_indval), genus_class$Genus)],
       col = list(Class = colors),
       show_annotation_name = FALSE,
-      annotation_legend_param = list(Class = list(
+      border = TRUE,
+      gp = gpar(col = "black", lw = 0.2),
+      annotation_legend_param = list(
         title_gp = gpar(fontsize = 20, fontface = "bold"),
         labels_gp = gpar(fontsize = 18),
-        direction = "horizontal"
-      ))
+        direction = "horizontal", 
+        border = "black"
+      )
     )
 
     indval_cell_fun <- function(j, i, x, y, width, height, fill, text_color_threshold = 0.5) {
@@ -139,6 +142,7 @@ plot_indval_CM <- function(df, basins, threshold, title, unique_classes) {
     column_names_gp = gpar(fontsize = 18),
     column_names_rot = 45,
     column_gap = unit(4, "mm"),
+    rect_gp = gpar(col = "black", lwd = 0.2),
     cell_fun = indval_cell_fun,
     heatmap_legend_param = list(
       title = "IndVal",
@@ -148,18 +152,19 @@ plot_indval_CM <- function(df, basins, threshold, title, unique_classes) {
       legend_width = unit(5, "cm"),
       title_gp = gpar(fontsize = 20, fontface = "bold"),
       labels_gp = gpar(fontsize = 18), 
-      border = "black"
+      border = "black", 
+      direction = "vertical"
     ),
     cluster_rows = FALSE,
     cluster_columns = FALSE,
     show_row_names = TRUE,
     row_names_side = "left",
-    row_names_gp = gpar(fontface = "italic", fontsize = 18),
+    row_names_gp = gpar(fontface = "italic", fontsize = 18), 
     right_annotation = ha_right_partial
     )
 }
 
-save_heatmap <- function(ht, filename, format = "pdf", width = 6, height = 5, res = 300) {
+save_heatmap <- function(ht, filename, format = "pdf", width = 6, height = 5, res = 300, annotation_legend_side = "right") {
   # Extract base name and make sure extension matches format
   ext <- tolower(format)
   if (!grepl(paste0("\\.", ext, "$"), filename)) {
@@ -176,7 +181,7 @@ save_heatmap <- function(ht, filename, format = "pdf", width = 6, height = 5, re
   )
 
   # Draw the heatmap
-  draw(ht)
+  draw(ht, annotation_legend_side = annotation_legend_side)
 
   # Close device
   dev.off()
@@ -379,12 +384,24 @@ genus_class <- phyto_abund %>%
             Class == "Bacillariophyceae" ~ Class,
             Class == "Coccolithophyceae" ~ Class,
             Class == "Dinophyceae" ~ Class,
-            TRUE ~ "Else"
+            Class == "Cryptophyceae" ~ Class,
+            TRUE ~ "ELSE"
         )
     ) %>% 
+    dplyr::mutate(
+        Class = case_when(
+            Class == "Bacillariophyceae" ~ "DIA",
+            Class == "Coccolithophyceae" ~ "COC",
+            Class == "Dinophyceae" ~ "DIN",
+            Class == "Cryptophyceae" ~ "CRY",
+            TRUE ~ Class
+        )
+    ) %>%
     arrange(Genus) %>%
     distinct()
 unique_classes <- unique(genus_class$Class)
+
+
 
 
 plots <- mapply(
@@ -401,27 +418,27 @@ plots <- mapply(
     names(IndVal)
 )
 
+indval_path <- paste(HOME_, "IndVal", sep = "/")
+
+save_heatmap(
+            plots[["NA"]], 
+            filename = file.path(indval_path, paste(paste("indval_per_basin_", "NA", sep = ""), IMAGE_FORMAT, sep = ".")),
+            format = IMAGE_FORMAT,
+            width = 8, height = 12, res = 300, 
+            annotation_legend_side =  "bottom"
+        )
+
+
 
 indval_path <- paste(HOME_, "IndVal", sep = "/")
 dir.create(indval_path, showWarnings = FALSE)
-mapply(
-    function(p, basin) {
-        ggsave(
-            p, 
-            file = file.path(indval_path, paste(paste("indval_per_basin_", basin, sep = ""), IMAGE_FORMAT, sep = ".")),
-            width = 18, height = 12, dpi = 300
-        )
-    },
-    plots,
-    names(plots)
-)
 mapply(
     function(p, basin) {
         save_heatmap(
             p, 
             filename = file.path(indval_path, paste(paste("indval_per_basin_", basin, sep = ""), IMAGE_FORMAT, sep = ".")),
             format = IMAGE_FORMAT,
-            width = 10, height = 12, res = 300
+            width = 8, height = 12, res = 300
         )
     },
     plots,
@@ -461,15 +478,53 @@ genera_basin <- sapply(
     simplify = FALSE
 ) %>% bind_rows()
 
-genera_basin %>% 
+genera_basin
+genera_basin %>%
+mutate(
+    Abbr. = case_when(
+        Genus == "Thalassionema" ~ "Tham", 
+        Genus == "Thalassiosira" ~ "Thar",
+        TRUE ~ substr(Genus, 1, 4)
+    )
+) %>% 
 group_by(Genus) %>% 
-mutate(n = n()) %>%
+summarise(
+    Abbr. = first(Abbr.),
+    n = n()
+) %>%
 arrange(desc(n), Genus) %>% write.csv(
     file = file.path(HOME_, "characteristic_genera_frequency.csv"), 
     row.names = FALSE
 )
 
+sapply(
+    names(IndVal), 
+    function(basin) {
+        genera <- order_species(
+            IndVal[[basin]] %>% mutate(across(where(is.numeric), ~ .^2)),
+            c("Winter", "Spring", "Summer", "Autumn"),
+            threshold = 0.25
+        )
+        IndVal[[basin]] %>% dplyr::filter(Taxon %in% genera) %>% 
+        mutate(across(where(is.numeric), ~ .^2)) %>%
+        rowwise() %>%
+        mutate(Season = colnames(across(where(is.numeric)))[which.max(c_across(where(is.numeric)))]) %>%
+        ungroup() %>% dplyr::select(Taxon, Season) %>% 
+        mutate(Basin = basin)
+    }, 
+    simplify = FALSE
+) %>% bind_rows() %>% 
+pivot_wider(names_from = Basin, values_from = Season) %>% 
+write.csv(
+    file = file.path(HOME_, "characteristic_genera_season_per_basin.csv"), 
+    row.names = FALSE
+)
 
+
+IndVal[["NA"]] %>% dplyr::filter(Taxon == "Ceratium") %>% 
+        mutate(across(where(is.numeric), ~ .^2)) %>%
+        rowwise() %>%
+        mutate(Season = colnames(across(where(is.numeric)))[which.max(c_across(where(is.numeric)))])
 
 indval_path <- paste(HOME_, "IndVal_log2", sep = "/")
 dir.create(indval_path, showWarnings = FALSE)
@@ -479,7 +534,7 @@ mapply(
             p, 
             filename = file.path(indval_path, paste(paste("indval_per_basin_", basin, sep = ""), IMAGE_FORMAT, sep = ".")),
             format = IMAGE_FORMAT,
-            width = 10, height = 12, res = 300
+            width = 8, height = 12, res = 300
         )
     },
     plots,
@@ -512,3 +567,13 @@ show_heatmap_legend = FALSE,
   show_row_names = FALSE,
   right_annotation = ha_right_complete
 )
+
+
+m = matrix(rnorm(100), 10)
+
+ha1 = HeatmapAnnotation(foo1 = runif(10), bar1 = sample(c("f", "m"), 10, replace = TRUE))
+ha2 = HeatmapAnnotation(foo2 = runif(10), bar2 = sample(c("f", "m"), 10, replace = TRUE))
+ht_list = Heatmap(m, name = "mat1", top_annotation = ha1) +
+    rowAnnotation(sth = runif(10)) +
+    Heatmap(m, name = "mat2", top_annotation = ha2)
+draw(ht_list, heatmap_legend_side = "left", annotation_legend_side = "bottom")

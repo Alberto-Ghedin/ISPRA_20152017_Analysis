@@ -10,6 +10,7 @@ library(openxlsx)
 library(rjson)
 library(patchwork)
 library(ggpp)
+library(ggrepel)
 
 IMAGE_FORNMAT <- "pdf"
 HOME_ <- "."
@@ -195,6 +196,13 @@ dplyr::filter(
 chem_phys$TRIX <- compute_TRIX(chem_phys)
 
 
+
+
+
+chem_phys %>% dplyr::filter(Basin == "NA") %>% ggplot() + 
+geom_boxplot(aes(x = Season, y = PO4, fill = Season)) + 
+facet_wrap(~Region, ncol = 1, scales = "free")
+
 vars_to_transform <- c("NH4", "NO3","PO4", "Salinity", "SiO4", "TN", "TP", "NP_tot", "pH")
 chem_phys <- chem_phys %>% mutate(across(all_of(vars_to_transform), boxcox_transform)) %>% 
 dplyr::select(-c(O_sat, NP)) %>%
@@ -222,8 +230,10 @@ vars_to_transform <- c("NH4", "NO3","PO4", "SiO4", "TN", "TP", "pH")
 covariates <- chem_phys
 
 
+plot(variation_partitioning)
 
-rows_with_positive_values %>% sum()
+showvarparts(4)
+
 run_variation_partitioning <- function(threshold, log_transform = TRUE, transfo = "hellinger") {
     relevant_genera <- sapply(
         IndVal,
@@ -276,7 +286,6 @@ run_variation_partitioning <- function(threshold, log_transform = TRUE, transfo 
         Transfo = ifelse(transfo == "hellinger", "RDA", "CCA"),
         Term = c("MeMs", "Env", "Season","MeMs+ Env", "Envs + Season", "MeMs + Season", "Mems + Env + Season", "Residuals")
     )
-
     return(result)
 }
 
@@ -288,6 +297,7 @@ results <- mapply(
     transfo = rep(c("hellinger", "chi.square"), times = 4),
     SIMPLIFY = FALSE
 ) %>% bind_rows()
+
 
 
 results %>% dplyr::mutate(
@@ -366,8 +376,9 @@ ordination.data <- create_resp_expl_data(
   vars,
   relevant_genera, 
     log_transform = TRUE, 
-    hellinger = FALSE
+    hellinger = TRUE
 )
+
 
 CCA <- compute_cca_model(
     ordination.data$resp, 
@@ -387,9 +398,10 @@ RDA <- compute_rda_model(
   )
 
 
-mems_vif <- vif.cca(CCA)[mems_cols]
+
+mems_vif <- vif.cca(RDA)[mems_cols]
 selected_mems_cols <- names(mems_vif[mems_vif < 10])
-CCA <- compute_rda_model(
+RDA <- compute_rda_model(
     ordination.data$resp, 
     ordination.data$expl, 
     covariates = vars, 
@@ -397,7 +409,7 @@ CCA <- compute_rda_model(
     partial_covariates = selected_mems_cols
   )
 
-null_model <- cca(
+null_model <- rda(
     as.formula(paste("ordination.data$resp ~ 1 + Condition(", 
           paste(selected_mems_cols, collapse = " + "),
           ")", sep = "")), 
@@ -405,7 +417,7 @@ null_model <- cca(
 )
 
 
-step_mod <- ordiR2step(null_model, scope = formula(CCA), direction = "backward", R2scope = TRUE, permutations = 999)
+step_mod <- ordiR2step(null_model, scope = formula(RDA), direction = "backward", R2scope = TRUE, permutations = 999)
 
 model <- step_mod
 sites <- cbind(
@@ -418,7 +430,17 @@ sites <- cbind(
 env_arrows <- scores(model, display = "bp", scaling = 2) %>% as.data.frame()
 centroids <- scores(model, display = "cn", scaling = 2) %>% as.data.frame()
 rownames(centroids) <- gsub("^Season", "", rownames(centroids))
-species <- scores(model, display = "species", scaling = 2) %>% as.data.frame()
+species <- scores(model, display = "species", scaling = 2) %>% as.data.frame() %>% 
+rownames_to_column("Genus") %>%
+dplyr::filter(Genus %in% important_taxa) %>%
+ mutate(
+            Genus = case_when(
+                Genus == "Thalassionema" ~ "Tham", 
+                Genus == "Thalassiosira" ~ "Thar",
+                TRUE ~ Genus
+            )
+        )
+species$Genus <- substr(species$Genus, 1, 4)
 perc <- round(100*(summary(model)$cont$importance[2, 1:2]), 2)
 important_taxa <- species %>%
   dplyr::mutate(dist = sqrt((.[[1]])^2 + (.[[2]])^2)) %>%
@@ -428,7 +450,7 @@ important_taxa <- species %>%
 axis1 <- grep("A1", colnames(env_arrows), value = TRUE)
 axis2 <- grep("A2", colnames(env_arrows), value = TRUE)
 
-spe_factor <- seq(4, 8, length.out = length(important_taxa))
+spe_factor <- seq(1, 1, length.out = length(important_taxa))
 p_spe <- sites %>% ggplot() + 
 geom_point(
     aes(x = !!as.symbol(axis1), 
@@ -440,18 +462,18 @@ geom_point(
     alpha = 0.8
     ) + 
 geom_segment(
-    data = species[important_taxa, ], 
+    data = species, 
     aes(x = 0, y = 0, xend = !!as.symbol(axis1) * spe_factor, yend = !!as.symbol(axis2) * spe_factor), 
     arrow = arrow(length = unit(0.2, "cm")), 
     col = "black", 
     linewidth = 1
     ) +
 geom_label_repel(
-    data = species[important_taxa, ], 
+    data = species, 
     aes(x = !!as.symbol(axis1) * spe_factor, y = !!as.symbol(axis2) * spe_factor), 
-    position = position_nudge_center(x = 0.2, y = 0.01,
+    position = position_nudge_center(x = 0.01, y = 0.01,
                                                     center_x = 0, center_y = 0),
-    label = substr(rownames(species[important_taxa, ]), 1, 4),
+    label = species %>% pull(Genus),
     size = 6,  
     color = "black", 
     fill = "white"
@@ -461,7 +483,8 @@ theme_bw() +
 theme(legend.position = "bottom")
 
 
-env_factor <- rep(5, nrow(env_arrows) - 3)
+env_factor <- rep(1, nrow(env_arrows) - 3)
+env_arrows["T", ] <- env_arrows["T", ] / 2
 p_env <- sites %>% ggplot() + 
 geom_point(
     aes(x = !!as.symbol(axis1), 
@@ -487,7 +510,7 @@ geom_label_repel(
       label = c(rownames(env_arrows)[seq(4, nrow(env_arrows))], rownames(centroids))
       ),
     position = position_nudge_center(
-      x = 0.2, y = 0.01,
+      x = 0.005, y = 0.005,
       center_x = 0, center_y = 0
       ),  
     size = 7, fontface = "bold",
@@ -504,16 +527,26 @@ geom_point(
 labs(x = paste(axis1, " (",perc[1], "%)", sep = "") , y = paste(axis2, " (",perc[2], "%)", sep = "")) + 
 theme_bw() + 
 theme(legend.position = "bottom")
-p <- p_spe + p_env + plot_layout(ncol = 2) + 
-plot_annotation(title = "CCA of phytoplankton communities in Italy") & 
-coord_cartesian(xlim = c(-4, 6)) &
+p_env
+p <-  p_env / p_spe + plot_layout(ncol = 1) + 
+plot_layout(guides = "collect") + 
+plot_annotation(title = "RDA of phytoplankton communities in Italy") & 
 plot_annotation(
-    title = "CCA of phytoplankton communities in Italy")
+    title = "RDA of phytoplankton communities in Italy", 
+    tag_levels = "A", tag_suffix = ")") &
+theme(
+  legend.title = element_text(face = "bold", size = 15),
+  legend.position = "bottom",
+  legend.text = element_text(size = 15), 
+  plot.title = element_text(hjust = 0.5, face = "bold", size = 18)
+  ) & 
+coord_cartesian(xlim = c(-0.6, 0.5)) 
+p
 ggsave(
     filename = file.path(HOME_, paste("ordination_all_italy.", IMAGE_FORNMAT, sep = "")), 
     plot = p,
-    width = 12,
-    height = 8,
+    width = 10,
+    height = 12,
     dpi = 300
 )
 
@@ -555,10 +588,19 @@ labs(title = paste("Ordination entire Italy"), x = paste(axis1, " (",perc[1], "%
 theme_bw() + 
 theme(legend.position = "bottom")
 
+p_all
 
 
+#in previous plot was modified
+site_scores <- scores(step_mod, display = "sites")
 
-p_load <- env_arrows[seq(4, nrow(env_arrows)), ] %>%
+# Correlate environmental variables with RDA axes
+cors <- cor(ordination.data$expl[, c("T", "Salinity", "PO4", "pH", "NO3", "DO", "SiO4")], site_scores[, 1:2])
+
+# Normalize each row of the correlation matrix so that the sum of absolute values in each row is 1
+cors_normalized <- t(apply(cors, 1, function(x) x / sqrt(sum(x^2))))
+cors_normalized
+p_load <- cors_normalized %>% as.data.frame() %>%
 rownames_to_column("Variable") %>%
 mutate(
     Variable = factor(Variable, levels = c(rownames(env_arrows)[seq(4, nrow(env_arrows))], rownames(centroids)), ordered = TRUE)
@@ -571,12 +613,12 @@ pivot_longer(
 geom_bar(
     aes(y = Variable, x = Value), 
     stat = "identity", position = "dodge"
-) + facet_wrap(~Axis, scales = "free", ncol = 1) + 
+) + facet_wrap(~Axis, scales = "free_y", ncol = 1) + 
 scale_y_discrete(limits = rev) +
 labs(
     title = "Corr. of env variables with RDA axes", 
-    x = "Variable", 
-    y = "Correlation"
+    y = "Variable", 
+    x = "Correlation"
 ) + 
 theme(
     axis.text.x = element_text(angle = 0, hjust = 1, size = 15), 
@@ -587,12 +629,27 @@ theme(
     legend.title = element_text(face = "bold", size = 15),
     legend.text = element_text(size = 12)
 )
-dev.off()
-p_spe + p_load
+p_load
 ggsave(
     filename = file.path(HOME_, paste("ordination_all_italy_env_arrows.", IMAGE_FORNMAT, sep = "")), 
-    plot = p,
-    width = 12,
-    height = 8,
+    plot = p_load,
+    width = 8,
+    height = 9,
     dpi = 300
 )
+
+vars <- c("T")
+
+fit <- envfit(step_mod, ordination.data$expl[, c("T", "Salinity", "PO4", "pH", "NO3", "DO", "SiO4", "Season")], permutations = 999)
+
+fit
+dev.off()
+plot(step_mod, display = c("sites", "species"))
+plot(fit, p.max = 0.05, col = "red")
+scores(fit, display = "vectors")
+
+0.9833 ^ 2 + 0.1812 ^ 2
+
+
+
+fit$vectors$arrows

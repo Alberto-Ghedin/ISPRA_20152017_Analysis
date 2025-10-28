@@ -8,7 +8,7 @@ library(ggspatial)
 library(rjson)
 
 IMG_FORMAT <- "pdf"
-HOME_ <- "./Paper_1"
+HOME_ <- "."
 source(file.path(HOME_, "utils.r"))
 italy <- st_read(paste(HOME_, "Italy_shp/Italy.shp", sep = "/"))
 surroundings <- st_read(paste(HOME_, "Surrounding_shp/Surrounding.shp", sep = "/"))
@@ -18,7 +18,7 @@ params <- fromJSON(file = file.path(HOME_, "params.json"))
 
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
 merge(
-    sea_depth %>% select(id, Transect,SeaDepth)
+    sea_depth %>% dplyr::select(id, Transect,SeaDepth)
 )
 phyto_abund$Region <- from_region_to_abreviation[as.character(phyto_abund$Region)]
 phyto_abund$Transect <- factor(phyto_abund$Transect, levels = ordered_transect, ordered = TRUE)
@@ -43,6 +43,7 @@ phyto_abund <- phyto_abund %>% mutate(
 )
 phyto_abund$Basin <- factor(phyto_abund$Basin, levels = c("NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE)
 
+
 basins_centers <- basins
 
 # Compute centroids after transforming to EPSG:3857 and back to original CRS
@@ -60,21 +61,21 @@ region_centers <- region_centers %>%
 
 # Map region names to abbreviations
 region_centers <- region_centers %>%
-  mutate(region = from_region_to_abbreviation[region])
+  mutate(region = from_region_to_abreviation[region])
 
 abbrv_positions <- list(
-  "ABR" = c(13.7, 42.23197), 
-  "PUG" = c(16.48, 40.9), 
-  "BAS" = c(15.9, 40.48), 
-  "CAL" = c(16.34784, 39.07882),
-  "CAM" = c(14.6, 40.8658),
+  "ABR" = c(13.8, 42.23197), 
+  "PUG" = c(16.6, 41), 
+  "BAS" = c(16.2, 40.48), 
+  "CAL" = c(16.5, 39.3),
+  "CAM" = c(14.7, 40.95),
   "EMR" = c(11.03106, 44.53113),
-  "FVG" = c(12.7, 46.16188),
-  "LAZ" = c(12.4, 41.98468),
-  "LIG" = c(9.15, 43.65),
-  "MAR" = c(12.9, 43.35484),
-  "MOL" = c(14.2, 41.6),
-  "SAR" = c(8.8, 40.09751),
+  "FVG" = c(12.95, 46.16188),
+  "LAZ" = c(12.55, 41.98468),
+  "LIG" = c(9.12, 44.5),
+  "MAR" = c(13.2, 43.37),
+  "MOL" = c(14.5, 41.6),
+  "SAR" = c(9.1, 40.09751),
   "SIC" = c(14.14632, 37.59335),
   "TOS" = c(11.12342, 43.45912),
   "VEN" = c(11.75, 45.6)
@@ -84,13 +85,24 @@ abbrv_positions <- list(
 region_centers <- region_centers %>%
   mutate(geometry = st_sfc(lapply(abbrv_positions, function(pos) st_point(pos)), crs = st_crs(italy)))
 
+region_centers %>% head()
 p <- ggplot() +
   geom_sf(data = surroundings, fill = "grey", color = "black") +
   geom_sf(data = italy, fill = "lightgrey", color = "black") + 
-   geom_text(data = region_centers, aes(x = st_coordinates(geometry)[,1], 
+   geom_text(data = region_centers %>% dplyr::filter(!(region %in% c("LIG", "MOL"))), aes(x = st_coordinates(geometry)[,1], 
                                              y = st_coordinates(geometry)[,2], 
                                              label = region),
                   size = 5, fontface = "bold") + 
+  geom_text_repel(
+    data = region_centers %>% dplyr::filter(region %in% c("LIG", "MOL")),
+    aes(x = st_coordinates(geometry)[,1], 
+        y = st_coordinates(geometry)[,2], 
+        label = region),
+    size = 5, fontface = "bold",
+    nudge_x = c(-1, 1),
+    nudge_y = c(-1, 1),
+    segment.color = "black"
+  ) + 
    scale_x_continuous(breaks = seq(8, 18.5, 1.5), limits = c(8, 18.5)) +
    scale_y_continuous(breaks = seq(36, 47, 1.5), limits = c(36, 47)) +
    ggspatial::annotation_north_arrow(
