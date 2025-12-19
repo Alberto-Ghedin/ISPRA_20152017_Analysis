@@ -85,7 +85,6 @@ abbrv_positions <- list(
 region_centers <- region_centers %>%
   mutate(geometry = st_sfc(lapply(abbrv_positions, function(pos) st_point(pos)), crs = st_crs(italy)))
 
-region_centers %>% head()
 p <- ggplot() +
   geom_sf(data = surroundings, fill = "grey", color = "black") +
   geom_sf(data = italy, fill = "lightgrey", color = "black") + 
@@ -145,3 +144,50 @@ ggsave(
     units = "in",
     dpi = 300
 )
+
+
+p <- ggplot() +
+  geom_sf(data = italy, fill = "lightgrey", color = "black") + 
+  geom_text(data = region_centers %>% dplyr::filter(!(region %in% c("LIG", "MOL"))), aes(x = st_coordinates(geometry)[,1], 
+                                             y = st_coordinates(geometry)[,2], 
+                                             label = region),
+                  size = 5, fontface = "bold") + 
+  geom_point(data = phyto_abund %>% dplyr::filter(Region %in% c("CAL", "CAM"), Basin == "ST") %>% group_by(Transect) %>% 
+  mutate(Longitude = mean(Longitude), Latitude = mean(Latitude)),
+         aes(x = Longitude, y = Latitude),
+         fill = "black",
+         color = "black",
+         size = 2) + 
+  geom_text_repel(
+    data = phyto_abund %>% dplyr::filter(Region %in% c("CAL", "CAM"), Basin == "ST") %>% group_by(Transect) %>% 
+  summarise(Longitude = mean(Longitude), Latitude = mean(Latitude)) %>% 
+  mutate(Transect = ifelse(Transect == "Vibo_marina", "Vibo Marina", as.character(Transect))),
+         aes(x = Longitude, y = Latitude, label = Transect),
+    size = 5, fontface = "bold",
+    segment.color = "black"
+  ) + 
+  labs(x = "Longitude", y = "Latitude") +
+  theme(
+    panel.background = element_rect(fill = "white"),
+    panel.border = element_rect(colour = "black", fill=NA, linewidth=1),
+    legend.position = "right", 
+    axis.text = element_text(size = 15),
+    axis.title = element_text(size = 15)
+  ) +
+  xlim(13.5, 16.5) + 
+  ylim(38.5, 41) 
+ggsave(
+    filename = paste(HOME_, paste("station_map_ST_cal_cam", IMG_FORMAT, sep = "."), sep = "/"),
+    plot = p,
+    width = 10,
+    height = 10,
+    units = "in",
+    dpi = 300
+)
+  
+
+phyto_abund %>% dplyr::filter(Region %in% c("CAL", "CAM"), Basin == "ST") %>% 
+  group_by(Transect) %>% 
+  summarise(Longitude = mean(Longitude), Latitude = mean(Latitude)) %>% 
+  ungroup() %>%
+  mutate(Transect = ifelse(Transect == "Vibo_marina", "Vibo Marina", as.character(Transect)))

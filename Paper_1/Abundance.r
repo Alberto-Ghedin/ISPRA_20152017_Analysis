@@ -11,7 +11,7 @@ library(colorBlindness)
 library(vegan)
 
 HOME_ <- "."
-IMAGE_FORMAT <- "pdf"
+IMAGE_FORMAT <- "png"
 source(file.path(HOME_, "utils.r"))
 
 
@@ -29,7 +29,6 @@ ggplot_theme <- ggplot2::theme_bw() +
 
 
 sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
-sea_depth %>% select(id, Transect,SeaDepth)
 params <- fromJSON(file = file.path(HOME_, "params.json"))
 
 phyto_abund <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% dplyr::filter(!(id == "VAD120" & Date == "2017-04-30")) %>% 
@@ -111,9 +110,36 @@ ggsave(
 )
 
 
-
-
-
+p <- phyto_abund %>% dplyr::filter(Region %in% c("CAM", "CAL"), Basin == "ST") %>% 
+dplyr::group_by(Transect, Date, id) %>% 
+summarise(
+    Abund = sum(Num_cell_l),
+    .groups = "drop"
+) %>%
+dplyr::mutate(
+    year = format(as.Date(Date), "%Y"), 
+    Transect = case_when(
+        Transect == "Vibo_marina" ~ "Vibo Marina",
+        TRUE  ~ Transect
+    )) %>% 
+dplyr::mutate(
+    Transect = factor(Transect, levels = c("Vibo Marina", "Cetraro", "Cilento", "Salerno",  "Napoli", "Domizio"), ordered = TRUE)
+) %>%
+ggplot() + 
+geom_boxplot(aes(x = Transect, y = log10(Abund + 1), fill = year)) + 
+labs(
+    title = "Abundance of selected transects \n in Southern Tyrrhenian", 
+    x = "Transect", 
+    y = "Abundance [cells/L] (log scale)"
+) + 
+ggplot_theme
+ggsave(
+    file.path(HOME_, paste("abundance_selected_transects_ST", IMAGE_FORMAT, sep = ".")), 
+    p, 
+    width = 11, 
+    height = 7, 
+    dpi = 300
+)
 
 kruskal_abund_test <- sapply(
     abund %>% pull(New_basin) %>% unique(),
@@ -196,9 +222,25 @@ summarise(
     .groups = "drop"
 ) %>% group_by(Season, Basin) %>% 
 mutate(Rel_abund = Abund / sum(Abund)) %>% 
+mutate(
+    Basin = case_match(
+        Basin,
+        "NA" ~ "Northern Adriatic",
+        "CA" ~ "Central Adriatic",
+        "SA" ~ "Southern Adriatic",
+        "SM" ~ "Ionian Sea",
+        "SIC" ~ "Sicily",
+        "ST" ~ "Southern Tyrrhenian",
+        "NT" ~ "Northern Tyrrhenian",
+        "LIG" ~ "Ligurian Sea",
+        "SAR" ~ "Sardinian Sea"
+    )
+) %>% mutate(
+    Basin = factor(Basin, levels = c("Northern Adriatic", "Central Adriatic", "Southern Adriatic", "Ionian Sea", "Sicily", "Southern Tyrrhenian", "Northern Tyrrhenian", "Ligurian Sea", "Sardinian Sea"), ordered = TRUE)
+) %>%
 ggplot(aes(y = Season, x = Rel_abund, fill = Group)) +
 geom_bar(stat = "identity", color = "black") +
-facet_wrap(~Basin, ncol = 1) +
+facet_wrap(~Basin, ncol = 3) +
 scale_fill_manual(values = unname(colorBlindness::paletteMartin)) +
 scale_y_discrete(limits = rev) + 
 labs(title = "Contribution of main groups \n to total abundance", y = "Season", x = "Relative abundance") +
@@ -212,8 +254,8 @@ p
 ggsave(
     file.path(HOME_, paste("abundance_per_group_barplot", IMAGE_FORMAT, sep = ".")), 
     p, 
-    width = 8, 
-    height = 17, 
+    width = 20, 
+    height = 12, 
     dpi = 300
 )
 

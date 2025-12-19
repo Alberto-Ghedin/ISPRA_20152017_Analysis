@@ -12,9 +12,18 @@ library(sf)
 
 HOME_ <- "."
 italy <- st_read("./Italy_shp/Italy.shp")
-rast <- raster(paste(path.expand("~"), "PHD/ISPRA_20152017_Analysis/Clustering/Unknown_effect/chl.nc", sep = "/"))
+stat_info <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% 
+dplyr::select(id, Latitude, Longitude) %>% 
+distinct()
+
 italy <- st_transform(italy, crs = crs(rast))
 is_water <- rasterize(italy, rast, field = 0, background = 1)
+italy_extent <- extent(italy)
+italy_extent@xmax <- 19
+is_water <- raster(italy_extent, res = 0.01, crs = st_crs(italy)$proj4string)
+values(is_water) <- 1  # Set all values to 1 (water/outside)
+is_water <- rasterize(italy, is_water, field = 0, update = TRUE)  # Set polygon area to 0 (land/inside)
+
 
 fun_perm <- function(x){
 
@@ -30,26 +39,6 @@ fun_perm <- function(x){
 tr <- transition(is_water, fun_perm, directions = 16)
 trc <- geoCorrection(tr, type = "c", scl = "FALSE")
 
-stat_info <- read.csv(file.path(HOME_, "phyto_abund.csv")) %>% 
-dplyr::select(c(id, Longitude, Latitude, Basin, Region)) %>% mutate(
-    New_basin = case_when(
-        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
-        Region %in% c("MAR", "ABR") ~ "CA", 
-        Region == "MOL" ~ "SA",
-        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
-        Region == "PUG" & Basin == "Ion" ~ "SM",
-        Region == "BAS" ~ "SM",
-        Region == "CAL" & Basin == "Ion" ~ "SM",
-        Region == "SIC" ~ "SIC", 
-        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
-        Region == "CAM" ~ "ST",
-        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
-        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
-        Region == "TOS" ~ "NT",
-        Region == "LIG" ~ "LIG",
-        Region == "SAR" ~ "SAR"
-    )
-    ) %>% distinct()
 
 cosDist_per_basin <- sapply(
     stat_info$New_basin %>% unique(), function(x) {
@@ -59,6 +48,26 @@ cosDist_per_basin <- sapply(
 )
 names(cosDist_per_basin) <- stat_info$New_basin %>% unique()
 
+cosDist_italy <- gdistance::costDistance(
+    trc, stat_info %>% dplyr::select(c(Longitude, Latitude)) %>% as.matrix()
+) / 1000
+
+
+morans <- adespatial::dbmem(cosDist_italy, MEM.autocor = "positive", silent = FALSE)
+bind_cols(
+    stat_info %>% dplyr::select(id, Longitude, Latitude),
+    as.data.frame(morans)
+) %>% ggplot() + 
+    geom_point(aes(x = Longitude, y = Latitude, color = MEM6), size = 3) +
+    scale_color_viridis_c() +
+    theme_minimal()
+
+bind_cols(
+    stat_info %>% dplyr::select(id, Longitude, Latitude),
+    as.data.frame(morans)
+) %>% write.csv(
+    file.path(HOME_, "MEMs_all_sites.csv"), row.names = FALSE
+)
 
 morans_per_basin <- 
 sapply(
@@ -95,3 +104,25 @@ for (i in seq_along(output_list)) {
 }
 
 saveWorkbook(wb, "./MEMs_per_basin.xlsx", overwrite = TRUE)
+
+
+#dplyr::select(c(id, Longitude, Latitude, Basin, Region)) %>% mutate(
+#    New_basin = case_when(
+#        Region %in% c("FVG", "VEN", "EMR") ~ "NA",
+#        Region %in% c("MAR", "ABR") ~ "CA", 
+#        Region == "MOL" ~ "SA",
+#        Region == "PUG" & Basin == "SouthAdr" ~ "SA",
+#        Region == "PUG" & Basin == "Ion" ~ "SM",
+#        Region == "BAS" ~ "SM",
+#        Region == "CAL" & Basin == "Ion" ~ "SM",
+#        Region == "SIC" ~ "SIC", 
+#        Region == "CAL" & Basin == "SouthTyr" ~ "ST",
+#        Region == "CAM" ~ "ST",
+#        Region == "LAZ" & Basin == "SouthTyr" ~ "ST",
+#        Region == "LAZ" & Basin == "NorthTyr" ~ "NT",
+#        Region == "TOS" ~ "NT",
+#        Region == "LIG" ~ "LIG",
+#        Region == "SAR" ~ "SAR"
+#    )
+#    ) %>% distinct()
+#rast <- raster(paste(path.expand("~"), "PHD/ISPRA_20152017_Analysis/Clustering/Unknown_effect/chl.nc", sep = "/"))

@@ -8,8 +8,8 @@ library(rjson)
 library(gridExtra)
 library(scales)
 
-HOME_ <- "./Paper_1"
-IMG_FORMAT <- "svg"
+HOME_ <- "."
+IMG_FORMAT <- "pdf"
 
 capitalize_first <- function(string) {
   paste0(toupper(substring(string, 1, 1)), substring(string, 2))
@@ -351,14 +351,13 @@ coast_length <- data.frame(
 
 acculumated_richness <- merge(acculumated_richness, coast_length, by = "Region")
 
-
 p <- ggplot(acculumated_richness) + 
   geom_point(aes(x = Coast_length, y = qD, colour = Level, fill = Level), size = 5) + 
-  geom_errorbar(aes(x = Coast_length, ymin = qD.LCL, ymax = qD.UCL, colour = Level), width = 0.5, position = position_dodge(width = 1))  +
+  geom_errorbar(aes(x = Coast_length, ymin = qD.LCL, ymax = qD.UCL, color = Level), width = 0.01)  +
     theme_bw(base_size = 18) +
     #scale_color_manual(values = custom_palette) +
-    labs(x = "Region", y = "Estimated richness") +
-    ggtitle("Estimated richness of species and genera") +
+    labs(x = "Coast length [km]", y = "Estimated richness") +
+    ggtitle("Estimated richness of species and genera \n vs coast length") +
     theme(
       axis.title.x = element_text(size = 20),
       axis.title.y = element_text(size = 20),
@@ -371,6 +370,7 @@ p <- ggplot(acculumated_richness) +
       legend.margin=margin(0,0,0,0),
       legend.box.margin=margin(t = -10)
     )
+p
 ggsave(
   paste(HOME_, "acc_curve_all_regions_genera_species_bar_per_coast_length.pdf", sep = "/"), 
   p, 

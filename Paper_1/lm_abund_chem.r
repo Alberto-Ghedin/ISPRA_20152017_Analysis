@@ -8,8 +8,8 @@ library(rjson)
 
 
 
-IMAGE_FORMAT <- "svg"
-HOME_ <- "./Paper_1"
+IMAGE_FORMAT <- "pdf"
+HOME_ <- "."
 
 sea_depth <- read.csv(file.path(HOME_, "transects_info.csv"))
 params <- fromJSON(file = file.path(HOME_, "params.json"))
@@ -81,7 +81,6 @@ sample_abund <- phyto_abund %>% group_by(Date, id) %>% summarise(
         Region == "SAR" ~ "SAR"
     )
 ) %>% merge(
-    sample_abund, 
     sea_depth %>% dplyr::select(id, SeaDepth, Transect)
 ) %>% 
 dplyr::mutate(
@@ -281,37 +280,108 @@ cleaned_data <- data_fit %>% dplyr::select(all_of(c("Region", "New_basin", vars,
     na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
 
 
-full_models <- sapply(
-    cleaned_data %>% pull(New_basin) %>% unique(), 
+cleaned_data <- sample_abund %>% dplyr::select(Basin, Region, Date, id, sample_abund) %>% 
+merge(
+    chem_phys %>% dplyr::mutate(
+    `log_NH4` = log(NH4),
+    `log_NO3` = log(NO3), 
+    `log_PO4` = log(PO4),
+    `log_SiO4` = log(SiO4),
+) %>% dplyr::select(
+    id, Date, `log_NH4`, `log_NO3`, `log_PO4`, `log_SiO4`, `Salinity`, `T`, `DO`), 
+    by = c("id", "Date")
+) %>% na.omit() %>% dplyr::filter(if_all(where(is.numeric), ~ is.finite(.)))
+
+vars <- c("log_NH4", "log_NO3", "log_PO4", "log_SiO4", "Salinity",  "T", "DO")
+full_model_all_italy <- lm(
+    paste(
+        "log10(sample_abund) ~", 
+        paste( 
+            vars
+            ,
+            collapse = " + "
+        )
+    ), 
+    data = cleaned_data %>% dplyr::mutate(across(all_of(vars), ~ decostand(., "standardize")))
+)
+
+coeffs_all_italy <- summary(step(full_model_all_italy))$coefficients[-1, c(1,4)] %>% as.data.frame() %>% 
+rownames_to_column(var = "Var") %>% 
+rename(p_value = `Pr(>|t|)`)
+
+
+selected_model_per_basin <- sapply(
+    cleaned_data %>% pull(Basin) %>% unique(), 
     function(name) {
-        data_reduced <- cleaned_data %>% 
-        dplyr::filter(New_basin == name) %>% 
-        dplyr::mutate(across(all_of(vars), ~ decostand(., "standardize")))
+        data_reduced <- 
         model <- lm(
             paste(
                 "log10(sample_abund) ~", 
                 paste(
-                    c("id", 
-                    vars
-                    ),
+                    vars,
                     collapse = " + "
                 )
             ), 
-            data = data_reduced
+            data = cleaned_data %>% 
+        dplyr::filter(Basin == name) %>% 
+        dplyr::mutate(across(all_of(vars), ~ decostand(., "standardize")))
         )
+        return(step(model))
         }, 
     simplify = FALSE
 )
-selections <- sapply(
-    names(full_models), 
-    function(name) {
-        data_reduced <- cleaned_data %>% 
-        dplyr::filter(New_basin == name) %>% 
-        dplyr::mutate(across(all_of(vars), ~ decostand(., "standardize")))
-        new_model <- step(full_models[[name]])
-    }
-)
+names(selected_model_per_basin) <- cleaned_data %>% pull(Basin) %>% unique()
 
+coeffs_per_basin <- sapply(
+    names(selected_model_per_basin), 
+    function(name) {
+        return(
+            summary(selected_model_per_basin[[name]])$coefficients[-1, c(1,4)] %>% 
+            as.data.frame() %>% 
+            rownames_to_column(var = "Var") %>% 
+            rename(p_value = `Pr(>|t|)`) %>% 
+            mutate(Basin = name)
+        )
+    }, 
+    simplify = FALSE
+)   
+coeffs_per_basin
+
+
+p <- bind_rows(
+    bind_rows(coeffs_per_basin), 
+    coeffs_all_italy %>% mutate(
+        Basin = "Italy"
+    )
+) %>% 
+mutate(
+    Basin = factor(Basin, levels = c("Italy", "NA", "CA", "SA", "SM", "SIC", "ST", "NT", "LIG", "SAR"), ordered = TRUE), 
+    Var = case_when(
+        Var == "log_NH4" ~ "log(NH4)", 
+        Var == "log_NO3" ~ "log(NO3)", 
+        Var == "log_PO4" ~ "log(PO4)", 
+        Var == "log_SiO4" ~ "log(SiO4)", 
+        TRUE ~ Var
+    )
+) %>% ggplot() + 
+geom_col(aes(x = Basin, y = Estimate, fill = as.factor(sign(Estimate))), position = "dodge", color = "black") +
+facet_wrap(~Var, ncol = 3) +
+labs(x = "Basin", title = "Standardized coefficients of linear models \n predicting log10(Abundance)") +
+theme(
+    axis.text.x = element_text(size = 18, angle = 90, vjust = 0.5), 
+    axis.text.y = element_text(size = 18), 
+    axis.title =  element_text(size = 20),
+    strip.text = element_text(size = 20, face = "bold"),
+    plot.title = element_text(size = 25, face = "bold", hjust = 0.5), 
+    legend.position = "none"
+)
+ggsave(
+    file.path(HOME_, paste("LM_abundance_per_basin_coefficients", IMAGE_FORMAT, sep = ".")), 
+    p, 
+    width = 10, 
+    height = 12, 
+    dpi = 300
+)
 
 mem_models <- sapply(
     names(mems), 
